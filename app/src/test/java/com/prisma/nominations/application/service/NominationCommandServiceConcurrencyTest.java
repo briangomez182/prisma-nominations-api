@@ -23,8 +23,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Requests simultáneas con la misma clave de idempotencia contra PostgreSQL real: la constraint UNIQUE
  * decide la ganadora y el resto responde como replay, sin generar eventos en el outbox.
+ * <p>
+ * ABM Adapter apagado: sin servidor HTTP no llega a ABM (solo reintentos y DLT en segundo plano). Mismas
+ * properties que {@code NominationsApiApplicationTests}: comparten contexto.
  */
-@SpringBootTest
+@SpringBootTest(properties = "nominations.abm.adapter.enabled=false")
 @Import(TestcontainersConfiguration.class)
 class NominationCommandServiceConcurrencyTest {
 

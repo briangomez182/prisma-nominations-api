@@ -2,22 +2,23 @@
 
 Eventos que publica el servicio de nominaciones. Se escriben en el **outbox** (`outbox_events`) en la misma
 transacción que el cambio de estado y un relay los publica en Kafka (D6, D7). Este documento es el contrato
-para los consumidores; los cambios dentro de una versión son solo aditivos (D14).
+para los consumidores; los cambios dentro de una versión son solo aditivos (D14). También documenta el tópico de
+entrada `abm.responses.v1`, cuyo contrato fija ABM.
 
 ## Tópicos
 
 | Tópico | Productor | Consumidores | Visibilidad | DLT |
 |--------|-----------|--------------|-------------|-----|
-| `nomination.requested.v1` | API de nominaciones (outbox) | ABM Adapter | Interno (lleva `account_id` completo) | `nomination.requested.v1-dlt` |
-| `abm.responses.v1` | ABM Adapter | API de nominaciones | Interno | `abm.responses.v1-dlt` |
-| `nomination.result.v1` | API de nominaciones (outbox) | Notificaciones, canales, BI | Público (datos enmascarados) | `nomination.result.v1-dlt` |
+| `nomination.requested.v1` | API de nominaciones (outbox) | ABM Adapter (grupo `abm-adapter`) | Interno (lleva `account_id` completo) | `nomination.requested.v1-dlt` |
+| `abm.responses.v1` | ABM (en la demo, el simulador `abm-mock`) | API de nominaciones (grupo `abm-response-processor`) | Interno | `abm.responses.v1-dlt` |
+| `nomination.result.v1` | API de nominaciones (outbox) | Notificaciones, canales, BI (ejemplo: grupo `notifications-demo`) | Público (datos enmascarados) | `nomination.result.v1-dlt` |
 
 - **Particiones:** `nominations.kafka.partitions` (6 por defecto). Es la unidad de paralelismo de cada consumer group.
 - **Replicación:** `nominations.kafka.replication-factor` (1 local; en producción ≥ 3 con `min.insync.replicas=2`).
 - **DLT:** convención de Spring Kafka, `<tópico>-dlt`, con la **misma cantidad de particiones** que el original
   (el mensaje fallido va a la misma partición). Los crea `KafkaTopicsConfig` al arrancar.
 
-## Mensaje
+## Mensaje (eventos del servicio)
 
 | Parte | Valor |
 |-------|-------|
@@ -68,6 +69,13 @@ cifrado en tránsito). `card_id` es siempre un **token**, nunca el PAN.
 }
 ```
 
+### Consumidor: ABM Adapter (grupo `abm-adapter`)
+
+Lee `nomination_id` (payload, o la key como respaldo) y `correlation_id`; el resto del payload (incluido
+`account_id`) ni se lee ni se loguea: el adapter carga la nominación de la base. Solo llama a ABM si la nominación
+sigue en `RECEIVED` (una reentrega no genera un segundo envío) y ABM es idempotente por `nomination_id`. Después
+pasa la nominación a `PENDING_ABM`. Ver la política de errores en [Errores y Dead Letter Topics](#errores-y-dead-letter-topics).
+
 ## `nomination.result` (v1)
 
 Resultado **final** de una nominación (`APPROVED` o `REJECTED`). Se publica **uno solo** por nominación (índice
@@ -105,6 +113,62 @@ código propio de ABM). `ABM_TIMEOUT` no publica resultado: si ABM responde tard
   "occurred_at": "2026-10-09T12:00:04.512Z"
 }
 ```
+
+## `abm.responses.v1` (entrada, contrato de ABM)
+
+Respuesta asincrónica de ABM a un alta aceptada (`POST {nominations.abm.base-url}/v1/nominations` → 202). La
+publica ABM, no este servicio: los nombres de campos son los de ABM. Lo consume `AbmResponseListener` (grupo
+`abm-response-processor`), que aplica estado + historial + `nomination.result` en el outbox en **una** transacción.
+
+| Parte | Valor |
+|-------|-------|
+| **Key** | `nomination_id` |
+| **Value** | JSON UTF-8, `snake_case` |
+| **Header `correlation_id`** | El que viajó en el pedido. Si falta, se usa el del payload. |
+
+No trae `event_id`: la deduplicación la da la máquina de estados (D9, ver abajo).
+
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `abm_operation_id` | string | no | Id de la operación en ABM (el mismo que devolvió el 202). Solo se loguea. |
+| `nomination_id` | UUID | sí | Nominación |
+| `request_id` | UUID | sí | Debe coincidir con el de la nominación; si no, se trata como respuesta ajena → DLT |
+| `correlation_id` | string | no | Respaldo del header |
+| `result` | enum | sí | `APPROVED` \| `REJECTED` (sin distinguir mayúsculas) |
+| `reason_code` | string | solo si `REJECTED` | Código propio de ABM |
+| `reason_description` | string | no | Texto de ABM; no se usa |
+| `responded_at` | ISO-8601 UTC | no | Momento de la respuesta en ABM |
+
+```json
+{
+  "abm_operation_id": "ABM-OP-1f0c2d3e-…",
+  "nomination_id": "3b9e7c1a-2f4d-4e8b-a6c5-0d1e2f3a4b5c",
+  "request_id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+  "correlation_id": "web-2f9c1a7e",
+  "result": "REJECTED",
+  "reason_code": "ABM-030",
+  "reason_description": "Tarjeta no habilitada para nominación",
+  "responded_at": "2026-10-09T12:00:04.123Z"
+}
+```
+
+**Normalización del motivo.** El código de ABM no sale del adapter: se guarda en `nominations.abm_reason_code`
+(solo auditoría) y la API y `nomination.result` exponen únicamente `rejection_reason`.
+
+| `reason_code` (ABM) | Significado en ABM | `rejection_reason` |
+|---------------------|--------------------|--------------------|
+| `ABM-010` | Cuenta inexistente o inválida | `INVALID_ACCOUNT` |
+| `ABM-020` | Tarjeta inexistente o inválida | `INVALID_CARD` |
+| `ABM-030` | Tarjeta no habilitada para nominación | `CARD_NOT_ELIGIBLE` |
+| `ABM-051` | Cuenta bloqueada | `ACCOUNT_BLOCKED` |
+| `ABM-060` | La cuenta ya está nominada a la tarjeta | `ALREADY_NOMINATED` |
+| otro o ausente | — | `OTHER` (WARN para sumarlo a la tabla) |
+
+**Idempotencia (E7, D9).** Si la nominación ya está en un estado final, una respuesta con el mismo resultado es
+`DUPLICATE` (ACK sin efectos: ni historial ni evento) y una con resultado distinto es `CONFLICT` (no se modifica,
+WARN). Dos respuestas simultáneas: la segunda pierde por lock optimista o por el índice único de `nomination.result`
+en el outbox, y se reevalúa como `DUPLICATE`. Una respuesta puede llegar antes de que el adapter confirme el envío:
+`RECEIVED → APPROVED/REJECTED` directo es válido.
 
 ## Garantías de entrega
 
@@ -148,6 +212,24 @@ Política del consumidor de referencia (`KafkaConsumerConfig`):
 |-------|-------------|
 | Transitorio (base caída, timeout) | 3 intentos con backoff fijo (`nominations.demo-consumer.max-attempts`, `.backoff`); agotados → DLT |
 | Poison pill (JSON inválido, falta `event_id` / `nomination_id` / `status`) | Directo al DLT, sin reintentos |
+
+ABM Adapter, `nomination.requested.v1` → `nomination.requested.v1-dlt` (`AbmAdapterConsumerConfig`):
+
+| Error | Tratamiento |
+|-------|-------------|
+| Falla técnica de ABM (timeout, conexión, 5xx, 408, 429) u otro error transitorio | `nominations.abm.adapter.max-attempts` intentos con backoff fijo (`.backoff`); agotados → DLT. La nominación queda en `RECEIVED` (fase 6: Resilience4j y paso a `ABM_TIMEOUT`). |
+| Rechazo de contrato de ABM (resto de 4xx, 2xx sin `abm_operation_id`) | Directo al DLT |
+| Poison pill (JSON inválido, sin `nomination_id`) o nominación inexistente | Directo al DLT |
+
+Consumer de respuestas, `abm.responses.v1` → `abm.responses.v1-dlt` (`AbmResponseConsumerConfig`):
+
+| Error | Tratamiento |
+|-------|-------------|
+| Transitorio (base caída) | `nominations.abm.response-consumer.max-attempts` intentos con backoff fijo; agotados → DLT |
+| Poison pill (JSON inválido, sin `nomination_id` / `request_id` / `result`, `result` desconocido) | Directo al DLT |
+| Nominación inexistente o `request_id` ajeno; transición inválida | Directo al DLT |
+
+Un rechazo funcional de ABM (`REJECTED`) **no** es un error: se aplica como cualquier respuesta (D10).
 
 El mensaje llega al DLT **sin modificar** (misma key, mismo valor, headers originales) más los headers de
 diagnóstico de Spring Kafka (`kafka_dlt-exception-fqcn`, `kafka_dlt-exception-message`,

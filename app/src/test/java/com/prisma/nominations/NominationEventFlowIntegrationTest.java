@@ -58,13 +58,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Flujo de eventos de punta a punta: POST → nominación + outbox en una TX → relay → Kafka → consumidor.
  * Relay programado ENCENDIDO, como en producción. Misma configuración que {@link NominationApiIntegrationTest}:
- * comparten el contexto (y los contenedores) del cache de Spring.
+ * comparten el contexto (y los contenedores) del cache de Spring. ABM Adapter apagado (sin servidor HTTP no hay
+ * a quién enviar); el circuito con ABM está en {@link AbmFlowIntegrationTest}.
  * <p>
  * Cada test usa entidad, request_id y correlation_id propios y lee los tópicos filtrando por key
  * (nomination_id), así no lo afectan los mensajes de otros tests. E8 (relay apagado) necesita otro contexto:
  * está en {@link NominationEventFlowRelayDownIntegrationTest}.
  */
-@SpringBootTest
+@SpringBootTest(properties = "nominations.abm.adapter.enabled=false")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)

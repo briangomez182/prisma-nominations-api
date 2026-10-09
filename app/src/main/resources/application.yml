@@ -52,6 +52,26 @@ nominations:
       enabled: true
       fixed-delay: 1h
       initial-delay: 1m
+  abm:
+    # En la demo ABM es un mock dentro de la misma app. Se resuelve en cada llamada (admite ${local.server.port}).
+    base-url: http://localhost:${local.server.port:${server.port:8080}}/abm-mock
+    connect-timeout: 2s
+    read-timeout: 5s
+    adapter:
+      enabled: true             # consumer de nomination.requested.v1 que envía a ABM
+      group-id: abm-adapter
+      max-attempts: 3           # fase 6: lo reemplaza Resilience4j
+      backoff: 1s
+    response-consumer:
+      enabled: true             # consumer de abm.responses.v1
+      group-id: abm-response-processor
+      max-attempts: 3
+      backoff: 1s
+  abm-mock:
+    enabled: true               # simulador de ABM (HTTP + respuesta asincrónica por Kafka); ver docs/abm-mock.md
+    response-delay: 2s          # en la vida real, minutos
+    duplicate-gap: 300ms        # separación entre las dos respuestas del escenario DUP
+    slow-http-delay: 10s        # demora del HTTP en el escenario SLOW (> read-timeout)
   demo-consumer:
     enabled: true               # consumidor de ejemplo de nomination.result.v1
     group-id: notifications-demo

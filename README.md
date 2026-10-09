@@ -44,7 +44,7 @@ Canal ──POST /v1/nominations──▶ Nominations API ──(1 TX: nominaci�
 | D5 | Consistencia estado ↔ evento | **Transactional Outbox**: el evento se inserta en la misma transacción que el cambio de estado | Dual write (guardar y publicar) | Si la TX hace rollback no hay evento; si Kafka está caído el evento espera en la tabla (E8). |
 | D6 | Relay del outbox | Demo: **polling** con `SELECT … FOR UPDATE SKIP LOCKED`, un evento pendiente por nominación por ciclo (orden) y marca de publicado después del ack (at-least-once). Producción: **Debezium (CDC)** | — | El contrato (tabla outbox) es el mismo; cambiar el relay no toca el dominio. Polling evita levantar Kafka Connect en la demo. |
 | D7 | Mensajería | **Kafka**, key = `nomination_id` (orden por nominación). Tópicos `nomination.requested.v1`, `abm.responses.v1`, `nomination.result.v1` + DLT | Cola administrada (SQS, RabbitMQ) | Retención y replay por offset: un consumidor caído retoma donde quedó (E9). Escala por particiones (E10). |
-| D8 | Integración ABM | Adapter que consume `nomination.requested.v1` y llama a ABM por HTTP; la respuesta vuelve por `abm.responses.v1` | Callback HTTP directo a la API | Desacopla y absorbe picos. En la demo, ABM es un mock (perfil `abm-mock`) que responde con demora configurable: aprueba, rechaza, no responde o duplica. |
+| D8 | Integración ABM | Adapter que consume `nomination.requested.v1` y llama a ABM por HTTP; la respuesta vuelve por `abm.responses.v1` | Callback HTTP directo a la API | Desacopla y absorbe picos. En la demo, ABM es un mock (`nominations.abm-mock.enabled`) que responde con demora configurable: aprueba, rechaza, no responde o duplica. |
 | D9 | Idempotencia de retorno ABM | La respuesta trae `nomination_id` + `request_id` + `correlation_id`. Si la nominación ya está en estado final → ACK sin efectos. `@Version` para respuestas simultáneas. | Tabla de dedup aparte | La máquina de estados ya sabe si la respuesta fue procesada (E7). |
 | D10 | Rechazo vs falla técnica | **Rechazo funcional** (respuesta de ABM con motivo) → `REJECTED`, no se reintenta. **Falla técnica** (timeout, 5xx, conexión) → reintento con backoff; agotado → DLT + `ABM_TIMEOUT` | Reintentar todo | Reintentar un rechazo funcional no cambia el resultado y duplica carga. Los 4xx de contrato tampoco se reintentan. |
 | D11 | Datos sensibles | `card_id` llega **tokenizado**: se rechaza cualquier valor con forma de PAN. `account_id` se expone y loguea **enmascarado**. | Recibir PAN y tokenizar adentro | La plataforma queda fuera del alcance PCI. En producción: cifrado de columna con KMS. |
@@ -93,8 +93,8 @@ Contrato de eventos (payloads, headers, versionado, DLT y reproceso): [`docs/eve
 
 | Tópico | Key | Productor | Consumidor | DLT |
 |--------|-----|-----------|------------|-----|
-| `nomination.requested.v1` | `nomination_id` | API (outbox → relay) | ABM Adapter (fase 5) | `nomination.requested.v1-dlt` |
-| `abm.responses.v1` | `nomination_id` | ABM Adapter (fase 5) | ABM Response Consumer (fase 5) | `abm.responses.v1-dlt` |
+| `nomination.requested.v1` | `nomination_id` | API (outbox → relay) | ABM Adapter `abm-adapter` | `nomination.requested.v1-dlt` |
+| `abm.responses.v1` | `nomination_id` | ABM (en la demo, el simulador) | ABM Response Consumer `abm-response-processor` | `abm.responses.v1-dlt` |
 | `nomination.result.v1` | `nomination_id` | API (outbox → relay) | Consumidor de ejemplo `notifications-demo` (+ canales, BI) | `nomination.result.v1-dlt` |
 
 Headers de todo mensaje: `event_id`, `event_type`, `schema_version`, `correlation_id`. Los tópicos y sus DLT (mismas
@@ -128,11 +128,53 @@ Consumidor de ejemplo (`notifications-demo`): commit de offset por registro desp
 | `nominations.outbox.purge.enabled` / `.fixed-delay` / `.initial-delay` | `true` / `1h` / `1m` | Purga del outbox |
 | `nominations.demo-consumer.enabled` / `.group-id` | `true` / `notifications-demo` | Consumidor de ejemplo de `nomination.result.v1` |
 | `nominations.demo-consumer.max-attempts` / `.backoff` | `3` / `1s` | Reintentos ante error transitorio antes del DLT |
+| `nominations.abm.base-url` | `http://localhost:${local.server.port}/abm-mock` | URL de ABM (se resuelve en cada llamada; en la demo, el simulador de la misma app) |
+| `nominations.abm.connect-timeout` / `.read-timeout` | `2s` / `5s` | Timeouts del cliente HTTP de ABM |
+| `nominations.abm.adapter.enabled` / `.group-id` | `true` / `abm-adapter` | ABM Adapter: consumer de `nomination.requested.v1` que envía a ABM |
+| `nominations.abm.adapter.max-attempts` / `.backoff` | `3` / `1s` | Intentos ante falla técnica de ABM antes del DLT (fase 6: Resilience4j) |
+| `nominations.abm.response-consumer.enabled` / `.group-id` | `true` / `abm-response-processor` | Consumer de `abm.responses.v1` |
+| `nominations.abm.response-consumer.max-attempts` / `.backoff` | `3` / `1s` | Reintentos ante error transitorio antes del DLT |
+| `nominations.abm-mock.enabled` | `true` (en `application.yml`) | Simulador de ABM; en producción `false` |
+| `nominations.abm-mock.response-delay` / `.duplicate-gap` / `.slow-http-delay` | `2s` / `300ms` / `10s` | Demora de la respuesta, separación de las copias en DUP y demora del HTTP en SLOW |
 
 Tests: `OutboxRelayIntegrationTest` (relay, orden, SKIP LOCKED, fallas de Kafka, purga),
 `NominationResultNotifierIntegrationTest` (dedup, DLT, evolución del esquema) y
 `NominationEventFlowIntegrationTest` / `NominationEventFlowRelayDownIntegrationTest` (flujo de punta a punta: E1,
 E3, E8, E9 y trazabilidad del `correlation_id`).
+
+## Integración con ABM
+
+```
+nomination.requested.v1 ─▶ ABM Adapter ──HTTP POST /v1/nominations──▶ ABM ── 202 {abm_operation_id}
+                              │ (RECEIVED → PENDING_ABM)                │
+                              │                                  (minutos después)
+                              ▼                                         ▼
+                                              abm.responses.v1 ◀────────┘
+                                                     │
+                     ABM Response Consumer ◀─────────┘  (1 TX: estado final + historial + nomination.result)
+```
+
+- **Envío (ida):** el ABM Adapter consume `nomination.requested.v1` y llama a ABM **fuera de toda transacción**;
+  con el 202 pasa la nominación a `PENDING_ABM` en una TX corta. ABM puede responder antes de esa confirmación:
+  `RECEIVED → APPROVED/REJECTED` directo es válido.
+- **Idempotencia de ida:** solo se envía si la nominación sigue en `RECEIVED` (una reentrega del evento no
+  reenvía) y ABM es idempotente por `nomination_id` (mismo `abm_operation_id`, sin segunda alta), lo que cubre
+  la ventana de una caída entre el 202 y el commit.
+- **Idempotencia de vuelta (E7):** la respuesta trae `nomination_id` + `request_id` + `correlation_id`. Sobre una
+  nominación ya final, el mismo resultado es `DUPLICATE` (ACK sin efectos) y uno distinto es `CONFLICT` (no se
+  modifica, WARN). El índice único del outbox garantiza **un solo** `nomination.result` por nominación.
+- **Rechazo funcional vs falla técnica (D10):** un `REJECTED` de ABM es una respuesta válida: estado `REJECTED`,
+  motivo normalizado (`ABM-030` → `CARD_NOT_ELIGIBLE`) y el código original solo en la base para auditoría; no se
+  reintenta. Una falla técnica (timeout, conexión, 5xx, 408, 429) se reintenta con backoff y, agotada, va a
+  `nomination.requested.v1-dlt` (fase 6: circuit breaker y `ABM_TIMEOUT`). Un 4xx de contrato va directo al DLT.
+- **Simulador:** el escenario se elige por el `card_id` (`tok_demo_ok_01` aprueba, `REJECT[_010|_020|_030|_060]`
+  rechaza, `DUP` responde dos veces, `SILENT` no responde, `FAIL` da 503, `SLOW` excede el read-timeout). Detalle
+  en [`docs/abm-mock.md`](docs/abm-mock.md); contrato de `abm.responses.v1` en [`docs/events.md`](docs/events.md);
+  requests de demo en [`docs/requests.http`](docs/requests.http).
+
+Tests: `AbmFlowIntegrationTest` (E4, E5, E7, SILENT, sin doble envío y trazabilidad, todo encendido con servidor
+HTTP real), `AbmMockIntegrationTest`, `NominationRequestedListenerIntegrationTest`,
+`AbmResponseListenerIntegrationTest`. Los contextos de test con MockMvc (sin servidor HTTP) apagan el ABM Adapter.
 
 ## Estructura
 
@@ -209,7 +251,7 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 - [x] Fase 2 — Dominio y base
 - [x] Fase 3 — API
 - [x] Fase 4 — Outbox + Kafka
-- [ ] Fase 5 — ABM mock + respuesta
+- [x] Fase 5 — ABM mock + respuesta
 - [ ] Fase 6 — Resiliencia
 - [ ] Fase 7 — Seguridad y observabilidad
 - [ ] Fase 8 — E2E y entrega

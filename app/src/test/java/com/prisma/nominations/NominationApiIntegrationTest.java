@@ -35,8 +35,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * API de punta a punta con contexto completo, PostgreSQL y Kafka reales (Testcontainers).
  * Cada test usa una entidad y un request_id aleatorios: los conteos en la base no se pisan entre tests.
+ * <p>
+ * ABM Adapter apagado: con MockMvc no hay servidor HTTP y el adapter no llegaría al simulador de ABM (solo
+ * reintentos y DLT en segundo plano). El circuito con ABM está en {@link AbmFlowIntegrationTest}. Mismas
+ * properties que {@link NominationEventFlowIntegrationTest}: comparten contexto.
  */
-@SpringBootTest
+@SpringBootTest(properties = "nominations.abm.adapter.enabled=false")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class NominationApiIntegrationTest {

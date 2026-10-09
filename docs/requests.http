@@ -116,3 +116,142 @@ Content-Type: application/json
   "account_id": "0001234567890987654",
   "card_id": "tok_4f9a2c7b8d1e"
 }
+
+### ─────────────────────────────────────────────────────────────────────────────
+# Integración con ABM (simulador, ver docs/abm-mock.md). El escenario se elige por el card_id.
+# Cada POST usa un request_id nuevo ({{$uuid}}): se puede repetir. La respuesta de ABM llega a los
+# ~2 s (nominations.abm-mock.response-delay): el GET inmediato muestra RECEIVED o PENDING_ABM.
+
+### E4 — ABM aprueba
+# Estado final: APPROVED. Historial RECEIVED → PENDING_ABM → APPROVED.
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-e4-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_ok_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("e4Id", response.body.nomination_id); %}
+
+### E4 — estado (repetir hasta ver el estado final)
+GET {{baseUrl}}/v1/nominations/{{e4Id}}
+X-Entity-Id: {{entity}}
+
+### E4 — historial
+GET {{baseUrl}}/v1/nominations/{{e4Id}}/history
+X-Entity-Id: {{entity}}
+
+### E5 — ABM rechaza (REJECT_030)
+# Estado final: REJECTED con rejection_reason CARD_NOT_ELIGIBLE (el código ABM-030 no se expone).
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-e5-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_REJECT_030",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("e5Id", response.body.nomination_id); %}
+
+### E5 — estado (repetir hasta ver el estado final)
+GET {{baseUrl}}/v1/nominations/{{e5Id}}
+X-Entity-Id: {{entity}}
+
+### E5b — ABM rechaza sin sufijo
+# Estado final: REJECTED con rejection_reason ACCOUNT_BLOCKED (ABM-051 por defecto).
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-e5b-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_REJECT_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("e5bId", response.body.nomination_id); %}
+
+### E5b — estado (repetir hasta ver el estado final)
+GET {{baseUrl}}/v1/nominations/{{e5bId}}
+X-Entity-Id: {{entity}}
+
+### E7 — ABM responde dos veces (DUP)
+# Estado final: APPROVED. Una sola transición a APPROVED y un solo nomination.result (ver historial).
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-e7-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_DUP_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("e7Id", response.body.nomination_id); %}
+
+### E7 — estado (repetir hasta ver el estado final)
+GET {{baseUrl}}/v1/nominations/{{e7Id}}
+X-Entity-Id: {{entity}}
+
+### E7 — historial (una sola fila con to_status APPROVED)
+GET {{baseUrl}}/v1/nominations/{{e7Id}}/history
+X-Entity-Id: {{entity}}
+
+### SILENT — ABM nunca responde
+# Queda en PENDING_ABM. La fase 6 agrega el sweeper que la pasa a ABM_TIMEOUT pasado el SLA.
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-silent-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_SILENT_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("silentId", response.body.nomination_id); %}
+
+### SILENT — estado (sigue en PENDING_ABM)
+GET {{baseUrl}}/v1/nominations/{{silentId}}
+X-Entity-Id: {{entity}}
+
+### FAIL — ABM no disponible (503)
+# Queda en RECEIVED: el adapter reintenta (max-attempts) y luego manda el mensaje a nomination.requested.v1-dlt (fase 6: ABM_TIMEOUT).
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-fail-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_FAIL_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("failId", response.body.nomination_id); %}
+
+### FAIL — estado (sigue en RECEIVED)
+GET {{baseUrl}}/v1/nominations/{{failId}}
+X-Entity-Id: {{entity}}

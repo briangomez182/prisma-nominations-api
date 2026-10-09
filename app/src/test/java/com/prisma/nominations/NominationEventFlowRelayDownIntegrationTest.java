@@ -36,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * La falla real de envío a Kafka (error del broker, ack que no llega dentro del send-timeout, intento registrado
  * y lote cortado) está cubierta en {@code OutboxRelayIntegrationTest}.
  */
-@SpringBootTest(properties = "nominations.outbox.relay.enabled=false")
+@SpringBootTest(properties = {"nominations.outbox.relay.enabled=false", "nominations.abm.adapter.enabled=false"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class NominationEventFlowRelayDownIntegrationTest {
