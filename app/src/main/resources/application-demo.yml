@@ -1,0 +1,32 @@
+# Perfil "demo": tiempos comprimidos para mostrar E1–E10 en vivo (scripts/demo.sh, docs/demo.md).
+# Se activa con SPRING_PROFILES_ACTIVE=demo (el docker-compose lo combina con json-logs).
+# Solo cambia TIEMPOS: la lógica, los tópicos y las garantías son las mismas que con los defaults de application.yml.
+#
+# Línea de tiempo esperada (E6, los tres casos lanzados a la vez):
+#   SILENT  PENDING_ABM ──(SLA 30s, sweeper cada 5s)──▶ ABM_TIMEOUT en ~30–35s ──reproceso──▶ RECEIVED → PENDING_ABM
+#   FAIL    3 intentos × (principal, retry 3s, 5s, 10s) ──▶ DLT ──▶ ABM_TIMEOUT en ~20–25s; el CB abre en el camino
+#   SLOW    cada intento corta a los 2s; capa 2 agotada (~25–45s) ──▶ ABM_TIMEOUT; ABM contesta el HTTP a los 50s
+#           y la respuesta tardía (~53s) la lleva a APPROVED con un único nomination.result
+nominations:
+  abm:
+    adapter:
+      # Capa 2 (antes 10s,1m,5m). Suman 18s: más que el CB abierto (10s, abajo), así el último reintento de una
+      # nominación sana que cayó durante la apertura encuentra el CB en HALF_OPEN y no termina en ABM_TIMEOUT.
+      retry-delays: 3s,5s,10s
+    sweeper:
+      fixed-delay: 5s           # antes 30s
+      response-sla: 30s         # antes 15m: SILENT pasa a ABM_TIMEOUT en ~30–35s
+  abm-mock:
+    response-delay: 3s          # antes 2s: alcanza para ver RECEIVED → PENDING_ABM → APPROVED con polling de 1s
+    slow-http-delay: 50s        # antes 10s: supera el peor caso de la capa 2 (~45s) → se ve ABM_TIMEOUT → APPROVED
+  metrics:
+    db-gauges:
+      cache-ttl: 5s             # outbox_pending / nominations_open se mueven en Grafana durante E8/E10
+    kafka-dlt:
+      refresh-interval: 10s     # kafka_dlt_messages sube poco después de E6-FAIL
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      abm:
+        wait-duration-in-open-state: 10s   # antes 30s: el CB abre en E6 y se lo ve volver a HALF_OPEN/CLOSED en vivo

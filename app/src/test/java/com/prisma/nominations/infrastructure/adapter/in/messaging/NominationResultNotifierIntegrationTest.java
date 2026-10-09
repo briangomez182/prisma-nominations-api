@@ -16,6 +16,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,7 @@ import static org.awaitility.Awaitility.await;
         "nominations.demo-consumer.backoff=100ms"})
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
+@Tag("integration")
 class NominationResultNotifierIntegrationTest {
 
     private static final String CONSUMER = "notifications-demo";
@@ -100,6 +102,7 @@ class NominationResultNotifierIntegrationTest {
     }
 
     @Test
+    @Tag("E9")
     @DisplayName("E7/E9: el mismo evento entregado dos veces produce una sola fila y un solo efecto")
     void duplicateEvent_processedOnce(CapturedOutput output) throws Exception {
         UUID eventId = UUID.randomUUID();
@@ -118,6 +121,7 @@ class NominationResultNotifierIntegrationTest {
     }
 
     @Test
+    @Tag("E9")
     @DisplayName("E9: con el consumidor detenido los eventos esperan en el tópico y al volver los procesa todos")
     void consumerDown_resumesFromCommittedOffset() throws Exception {
         MessageListenerContainer container = registry.getListenerContainer(NominationResultNotifier.LISTENER_ID);

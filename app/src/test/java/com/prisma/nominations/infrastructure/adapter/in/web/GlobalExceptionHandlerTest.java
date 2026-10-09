@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -49,6 +50,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         SecurityAutoConfiguration.class, SecurityFilterAutoConfiguration.class, OAuth2ResourceServerAutoConfiguration.class})
 // El controller de prueba es una clase anidada: el escaneo de tests la excluye, por eso se importa explícitamente.
 @Import({ErrorTestController.class, GlobalExceptionHandler.class, CorrelationIdFilter.class})
+@Tag("E2")
 class GlobalExceptionHandlerTest {
 
     private static final String PAN = "4111111111111111";

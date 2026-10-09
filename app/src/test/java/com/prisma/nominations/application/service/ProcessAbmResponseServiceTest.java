@@ -12,6 +12,7 @@ import com.prisma.nominations.domain.ChangeSource;
 import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.RejectionReason;
 import com.prisma.nominations.domain.ResolutionOutcome;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -79,6 +80,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E4")
     void approvedIsAppliedAndPublishesOneResult() {
         var nomination = pending();
 
@@ -102,6 +104,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E5")
     void rejectedKeepsNormalizedReasonAndOriginalCode() {
         var nomination = pending();
 
@@ -121,6 +124,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E7")
     void duplicateResponseHasNoEffects() {
         var nomination = pending();
         service.process(approved(nomination));
@@ -136,6 +140,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E7")
     void contradictoryResponseIsConflictAndChangesNothing() {
         var nomination = pending();
         service.process(approved(nomination));
@@ -170,6 +175,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E6")
     void lateResponseAfterTimeoutIsApplied() {
         var nomination = pending();
         var timedOut = reload(nomination.id());
@@ -185,6 +191,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E7")
     void concurrentSameResponseLosesOptimisticLockAndEndsAsDuplicate() {
         var nomination = pending();
         // La otra respuesta idéntica commitea (estado + evento) entre la lectura y el save de esta.
@@ -203,6 +210,7 @@ class ProcessAbmResponseServiceTest {
     }
 
     @Test
+    @Tag("E7")
     void concurrentSameResponseLosesOnResultIndexAndEndsAsDuplicate() {
         var nomination = pending();
         // La otra TX ya dejó su nomination.result: el append de esta viola el índice único (IllegalStateException).

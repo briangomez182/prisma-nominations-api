@@ -11,6 +11,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Decorador de resiliencia con registries propios (mismas reglas que application.yml, tiempos chicos) y un
  * {@link AbmClient} fake que cuenta invocaciones.
  */
+@Tag("E6")
 class ResilientAbmClientTest {
 
     private static final Duration OPEN_WAIT = Duration.ofMillis(100);

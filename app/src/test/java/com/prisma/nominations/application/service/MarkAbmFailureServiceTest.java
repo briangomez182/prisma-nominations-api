@@ -6,6 +6,7 @@ import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.ChangeSource;
 import com.prisma.nominations.domain.Nomination;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -21,6 +22,7 @@ import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@Tag("E6")
 class MarkAbmFailureServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-09T12:00:00Z");

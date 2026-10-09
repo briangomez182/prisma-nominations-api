@@ -8,6 +8,7 @@ import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.InvalidNominationDataException;
 import com.prisma.nominations.domain.Nomination;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -39,6 +40,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E1")
     void createsNewNominationInReceived() {
         var result = service.create(command(UUID.randomUUID()));
 
@@ -58,6 +60,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void sameRequestWithSameContentReturnsExistingWithoutCreating() {
         var requestId = UUID.randomUUID();
         var first = service.create(command(requestId));
@@ -73,6 +76,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void sameRequestWithDifferentContentIsConflict() {
         var requestId = UUID.randomUUID();
         service.create(command(requestId));
@@ -87,6 +91,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void sameRequestIdInAnotherEntityIsIndependent() {
         var requestId = UUID.randomUUID();
         service.create(command(requestId));
@@ -98,6 +103,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void lostRaceRereadsAndReturnsWinnerAsReplay() {
         var requestId = UUID.randomUUID();
         var winner = Nomination.receive("ENT01", requestId, "123456", new AccountId("987654"),
@@ -113,6 +119,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void lostRaceWithDifferentContentIsConflict() {
         var requestId = UUID.randomUUID();
         var winner = Nomination.receive("ENT01", requestId, "OTRO", new AccountId("987654"),
@@ -125,6 +132,7 @@ class NominationCommandServiceTest {
     }
 
     @Test
+    @Tag("E2")
     void panAsCardIdIsRejectedAndNothingIsSaved() {
         var withPan = new CreateNominationCommand("ENT01", UUID.randomUUID(), "123456", "987654",
                 "4111111111111111", null, "corr-1");

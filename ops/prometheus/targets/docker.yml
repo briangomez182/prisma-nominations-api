@@ -1,0 +1,5 @@
+# Modo "todo en Docker" (default): la app es el servicio `app` del compose.
+- targets: ["app:8080"]
+  labels:
+    service: prisma-nominations-api
+    runs_on: docker

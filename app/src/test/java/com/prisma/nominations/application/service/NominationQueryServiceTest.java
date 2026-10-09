@@ -5,6 +5,7 @@ import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.StatusChange;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -54,6 +55,7 @@ class NominationQueryServiceTest {
     }
 
     @Test
+    @Tag("E1")
     void historyIsChronological() {
         var nomination = saved();
 

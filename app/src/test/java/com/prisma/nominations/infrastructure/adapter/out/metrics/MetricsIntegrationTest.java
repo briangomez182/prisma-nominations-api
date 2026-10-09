@@ -8,6 +8,7 @@ import com.prisma.nominations.application.port.in.ProcessAbmResponseUseCase;
 import com.prisma.nominations.domain.AbmDecision;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "nominations.metrics.kafka-dlt.initial-delay=1h"})
 @AutoConfigureObservability(tracing = false)
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class MetricsIntegrationTest {
 
     private static final String ENTITY = "ENTMETRICS";

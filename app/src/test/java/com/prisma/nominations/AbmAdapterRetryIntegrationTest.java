@@ -14,6 +14,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -58,6 +59,7 @@ import static org.mockito.Mockito.doAnswer;
         // Esperas cortas pero medibles: el primer mensaje tarda >= 2 s en agotar sus reintentos.
         "nominations.abm.adapter.retry-delays=1s,1s"})
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class AbmAdapterRetryIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
@@ -105,6 +107,7 @@ class AbmAdapterRetryIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("E6: ABM no disponible → -retry-0 → -retry-1 → DLT → ABM_TIMEOUT, sin nomination.result")
     void unavailable_exhaustsRetriesAndMarksAbmTimeout() throws Exception {
         UUID id = create("it-unavailable");
@@ -134,6 +137,7 @@ class AbmAdapterRetryIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("contrato: sin reintentos, DLT y ABM_TIMEOUT por contrato")
     void contract_goesStraightToDltAndMarksAbmTimeout() throws Exception {
         UUID id = create("it-contract");
@@ -156,6 +160,7 @@ class AbmAdapterRetryIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("transitorio que se recupera en el 2º intento → PENDING_ABM, sin DLT")
     void transient_recoversOnSecondAttempt() throws Exception {
         UUID id = create("it-transient");
@@ -176,6 +181,8 @@ class AbmAdapterRetryIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
+    @Tag("E10")
     @DisplayName("E10: un mensaje fallando no bloquea su partición: el siguiente se procesa antes de que agote reintentos")
     void failingMessage_doesNotBlockItsPartition() throws Exception {
         UUID failing = create("it-blocking-1");

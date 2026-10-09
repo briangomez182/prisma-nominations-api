@@ -20,6 +20,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,6 +58,7 @@ import static org.awaitility.Awaitility.await;
         "nominations.abm.response-consumer.backoff=100ms"})
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
+@Tag("integration")
 class AbmResponseListenerIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
@@ -91,6 +93,7 @@ class AbmResponseListenerIntegrationTest {
     }
 
     @Test
+    @Tag("E4")
     @DisplayName("E4: ABM aprueba → APPROVED, historial y un nomination.result en el outbox")
     void approved_resolvesAndAppendsResult() throws Exception {
         Nomination nomination = createNomination();
@@ -104,6 +107,7 @@ class AbmResponseListenerIntegrationTest {
     }
 
     @Test
+    @Tag("E7")
     @DisplayName("E7: la misma respuesta entregada dos veces se procesa una sola vez")
     void duplicateResponse_processedOnce(CapturedOutput output) throws Exception {
         Nomination nomination = createNomination();
@@ -121,6 +125,7 @@ class AbmResponseListenerIntegrationTest {
     }
 
     @Test
+    @Tag("E5")
     @DisplayName("E5: ABM rechaza con ABM-051 → REJECTED con motivo ACCOUNT_BLOCKED y evento")
     void rejected_normalizesReason() throws Exception {
         Nomination nomination = createNomination();

@@ -9,6 +9,7 @@ import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.RejectionReason;
 import com.prisma.nominations.domain.StatusChange;
 import jakarta.persistence.PersistenceException;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({PostgresTestcontainersConfiguration.class, NominationPersistenceAdapter.class})
+@Tag("integration")
 class NominationPersistenceAdapterTest {
 
     private static final Instant NOW = Instant.parse("2026-10-08T12:00:00Z");
@@ -61,6 +63,7 @@ class NominationPersistenceAdapterTest {
     }
 
     @Test
+    @Tag("E3")
     void sameRequestIdIsUniquePerEntity() {
         var requestId = UUID.randomUUID();
         adapter.save(newNomination("ENT01", requestId));
@@ -71,6 +74,7 @@ class NominationPersistenceAdapterTest {
     }
 
     @Test
+    @Tag("E7")
     void concurrentAbmResponsesOnlyOneWins() {
         var id = adapter.save(newNomination("ENT01", UUID.randomUUID())).id();
         var first = adapter.findById(id).orElseThrow();

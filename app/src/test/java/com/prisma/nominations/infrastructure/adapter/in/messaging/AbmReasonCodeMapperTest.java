@@ -1,6 +1,7 @@
 package com.prisma.nominations.infrastructure.adapter.in.messaging;
 
 import com.prisma.nominations.domain.RejectionReason;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -8,6 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Tag("E5")
 class AbmReasonCodeMapperTest {
 
     @ParameterizedTest

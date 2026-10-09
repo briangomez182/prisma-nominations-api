@@ -15,6 +15,7 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -61,6 +62,7 @@ import static org.mockito.Mockito.when;
         "nominations.outbox.relay.batch-size=5"
 })
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class OutboxRelayIntegrationTest {
 
     private static final int PARTITIONS = 3;
@@ -121,6 +123,7 @@ class OutboxRelayIntegrationTest {
     }
 
     @Test
+    @Tag("E10")
     @DisplayName("E10 - dos relays en paralelo: cada evento se publica una sola vez y en orden (SKIP LOCKED)")
     void concurrentRelaysPublishEachEventOnce() throws Exception {
         int nominations = 10;
@@ -165,6 +168,7 @@ class OutboxRelayIntegrationTest {
     }
 
     @Test
+    @Tag("E8")
     @DisplayName("E8 - Kafka falla: el evento queda pendiente con el intento registrado y el lote se corta")
     void sendFailureKeepsEventPendingAndCutsBatch() throws Exception {
         UUID first = insert(UUID.randomUUID(), "nomination.requested", 0, "corr-e8-1");
@@ -197,6 +201,7 @@ class OutboxRelayIntegrationTest {
     }
 
     @Test
+    @Tag("E8")
     @DisplayName("E8 - el ack no llega dentro del send-timeout: cuenta como falla y se reintenta")
     void ackTimeoutCountsAsFailure() {
         UUID id = insert(UUID.randomUUID(), "nomination.requested", 0, "corr-e8-timeout");

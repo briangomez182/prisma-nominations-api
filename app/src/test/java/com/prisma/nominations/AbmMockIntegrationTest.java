@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,6 +40,7 @@ import static org.awaitility.Awaitility.await;
         "nominations.abm.response-consumer.enabled=false",
         "nominations.outbox.relay.enabled=false"})
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class AbmMockIntegrationTest {
 
     private static final String TOPIC = "abm.responses.v1";
@@ -54,6 +56,7 @@ class AbmMockIntegrationTest {
     private final HttpClient http = HttpClient.newHttpClient();
 
     @Test
+    @Tag("E4")
     @DisplayName("E4: 202 con abm_operation_id y APPROVED en abm.responses.v1 con key, header y JSON correctos")
     void acceptsAndPublishesApproval() throws Exception {
         String nominationId = UUID.randomUUID().toString();
@@ -91,6 +94,7 @@ class AbmMockIntegrationTest {
     }
 
     @Test
+    @Tag("E5")
     @DisplayName("E5: REJECT_030 → REJECTED con reason_code ABM-030")
     void rejects() throws Exception {
         String nominationId = UUID.randomUUID().toString();
@@ -104,6 +108,7 @@ class AbmMockIntegrationTest {
     }
 
     @Test
+    @Tag("E7")
     @DisplayName("E7: DUP → dos mensajes idénticos")
     void duplicates() throws Exception {
         String nominationId = UUID.randomUUID().toString();
@@ -117,6 +122,7 @@ class AbmMockIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("E6: FAIL → 503; contrato inválido → 400 (respuestas simples de ABM, no ProblemDetail)")
     void failAndInvalid() throws Exception {
         HttpResponse<String> unavailable = post(body(UUID.randomUUID().toString(), UUID.randomUUID().toString(),
@@ -134,6 +140,7 @@ class AbmMockIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("E6: SLOW → el HTTP no responde dentro de un read-timeout corto")
     void slowTimesOut() {
         String json = body(UUID.randomUUID().toString(), UUID.randomUUID().toString(), "it-slow", "tok_demo_SLOW_01");

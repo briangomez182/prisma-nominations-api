@@ -22,6 +22,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,6 +67,7 @@ import static org.mockito.Mockito.verify;
         "nominations.abm.adapter.enabled=true",
         "nominations.abm.adapter.retry-delays=200ms,200ms"})
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class NominationRequestedListenerIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
@@ -136,6 +138,7 @@ class NominationRequestedListenerIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("AbmContractException → nomination.requested.v1-dlt sin reintentos y ABM_TIMEOUT por contrato")
     void contractError_goesToDltWithoutRetries() throws Exception {
         UUID nominationId = UUID.randomUUID();
@@ -156,6 +159,7 @@ class NominationRequestedListenerIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("AbmUnavailableException → -retry-0 → -retry-1 → DLT y ABM_TIMEOUT, con el correlation id en todos")
     void unavailable_retriedThroughRetryTopicsThenDlt() throws Exception {
         UUID nominationId = UUID.randomUUID();
@@ -183,6 +187,7 @@ class NominationRequestedListenerIntegrationTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("transitorio que se recupera en el 2º intento: no llega al DLT ni marca falla")
     void unavailableOnce_recoversOnRetry() throws Exception {
         UUID nominationId = UUID.randomUUID();

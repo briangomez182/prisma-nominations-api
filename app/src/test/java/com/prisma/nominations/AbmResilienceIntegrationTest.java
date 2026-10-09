@@ -16,6 +16,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -79,6 +80,7 @@ import static org.hamcrest.Matchers.equalTo;
         "nominations.abm.sweeper.fixed-delay=500ms",
         "nominations.abm.sweeper.response-sla=2s"})
 @Import({TestcontainersConfiguration.class, AbmResilienceIntegrationTest.AbmRequestRecorder.class})
+@Tag("integration")
 class AbmResilienceIntegrationTest {
 
     static final int SLOW_HTTP_DELAY_SECONDS = 12;
@@ -129,6 +131,7 @@ class AbmResilienceIntegrationTest {
 
     @Nested
     @DisplayName("E6-FAIL - ABM caído (503): capa 1 × capa 2, DLT y ABM_TIMEOUT sin resultado")
+    @Tag("E6")
     class E6Fail {
 
         @Test
@@ -167,6 +170,7 @@ class AbmResilienceIntegrationTest {
 
     @Nested
     @DisplayName("E6-SLOW - read-timeout, reintentos agotados y respuesta tardía: ABM_TIMEOUT → APPROVED")
+    @Tag("E6")
     class E6Slow {
 
         /**
@@ -212,6 +216,7 @@ class AbmResilienceIntegrationTest {
 
     @Nested
     @DisplayName("E6-SILENT - sin respuesta: sweeper → ABM_TIMEOUT y reproceso por el endpoint interno")
+    @Tag("E6")
     class E6Silent {
 
         /**
@@ -267,6 +272,7 @@ class AbmResilienceIntegrationTest {
 
     @Nested
     @DisplayName("Circuit breaker - abre con fallas reales, corta sin llamar a ABM y se recupera en HALF_OPEN")
+    @Tag("E6")
     class CircuitBreakerOpensAndRecovers {
 
         /**
@@ -335,6 +341,8 @@ class AbmResilienceIntegrationTest {
 
     @Nested
     @DisplayName("Rechazo funcional vs falla técnica: REJECTED sin reintentos ni tópicos de retry")
+    @Tag("E5")
+    @Tag("E6")
     class FunctionalRejectionIsNotRetried {
 
         /**

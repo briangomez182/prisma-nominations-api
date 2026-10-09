@@ -6,6 +6,7 @@ import com.prisma.nominations.abmmock.AbmMockEngine.Outcome;
 import com.prisma.nominations.abmmock.AbmMockMessages.SubmitRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -50,6 +51,7 @@ class AbmMockEngineTest {
     }
 
     @Test
+    @Tag("E4")
     @DisplayName("E4: card_id común → 202 y APPROVED con payload exacto en snake_case")
     void approves() throws Exception {
         SubmitRequest request = request("tok_demo_ok_01");
@@ -70,6 +72,7 @@ class AbmMockEngineTest {
     }
 
     @Test
+    @Tag("E7")
     @DisplayName("Idempotencia: el mismo nomination_id → mismo abm_operation_id y una sola respuesta")
     void idempotentByNominationId() throws Exception {
         SubmitRequest request = request("tok_demo_ok_02");
@@ -89,6 +92,7 @@ class AbmMockEngineTest {
             "tok_demo_REJECT_020,    ABM-020, Tarjeta inexistente o inválida",
             "tok_demo_REJECT_030,    ABM-030, Tarjeta no habilitada para nominación",
             "tok_demo_REJECT_060,    ABM-060, La cuenta ya está nominada a la tarjeta"})
+    @Tag("E5")
     @DisplayName("E5: REJECT → REJECTED con el código según el sufijo (ABM-051 por defecto)")
     void rejects(String cardId, String reasonCode, String reasonDescription) throws Exception {
         assertThat(engine.submit(request(cardId))).isInstanceOf(Outcome.Accepted.class);
@@ -100,6 +104,7 @@ class AbmMockEngineTest {
     }
 
     @Test
+    @Tag("E7")
     @DisplayName("E7: DUP → la misma respuesta APPROVED publicada dos veces")
     void duplicates() throws Exception {
         SubmitRequest request = request("tok_demo_DUP_01");
@@ -114,6 +119,7 @@ class AbmMockEngineTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("E6: SILENT → 202 y nunca responde")
     void silent() throws Exception {
         assertThat(engine.submit(request("tok_demo_SILENT_01"))).isInstanceOf(Outcome.Accepted.class);
@@ -123,6 +129,7 @@ class AbmMockEngineTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("E6: FAIL → no disponible (503) en cada intento, sin registrar ni responder")
     void fails() throws Exception {
         SubmitRequest request = request("tok_demo_FAIL_01");
@@ -135,6 +142,7 @@ class AbmMockEngineTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("E6: SLOW → el alta tarda slow-http-delay y luego aprueba")
     void slow() {
         long start = System.nanoTime();

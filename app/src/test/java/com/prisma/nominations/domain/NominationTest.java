@@ -1,5 +1,6 @@
 package com.prisma.nominations.domain;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -23,6 +24,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E1")
     void receiveStartsInReceivedAndRecordsCreation() {
         var nomination = newNomination();
 
@@ -39,6 +41,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E4")
     void happyPathRecordsEveryTransition() {
         var nomination = newNomination();
 
@@ -53,6 +56,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E5")
     void rejectionKeepsNormalizedReasonAndAbmCode() {
         var nomination = newNomination();
         nomination.markSentToAbm(NOW);
@@ -65,6 +69,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E7")
     void duplicatedAbmResponseHasNoEffect() {
         var nomination = newNomination();
         nomination.markSentToAbm(NOW);
@@ -76,6 +81,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E7")
     void contradictoryAbmResponseIsReportedAndIgnored() {
         var nomination = newNomination();
         nomination.markSentToAbm(NOW);
@@ -98,6 +104,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E6")
     void timedOutNominationAcceptsLateResponse() {
         var nomination = newNomination();
         nomination.markSentToAbm(NOW);
@@ -108,6 +115,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E6")
     void timedOutNominationCanBeReprocessed() {
         var nomination = newNomination();
         nomination.markTimedOut(ChangeSource.ABM_ADAPTER, "Reintentos agotados", NOW);
@@ -137,6 +145,7 @@ class NominationTest {
     }
 
     @Test
+    @Tag("E2")
     void requiredFieldsAreValidated() {
         assertThatThrownBy(() -> Nomination.receive("ENT01", UUID.randomUUID(), " ", new AccountId("987654"),
                 new CardToken("tok_4f9a2c"), null, "corr-1", NOW))

@@ -10,6 +10,7 @@ import com.prisma.nominations.domain.AbmDecision;
 import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.Nomination;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -92,6 +93,7 @@ class SubmitToAbmServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void alreadyPendingIsSkippedWithoutCallingAbm() {
         var nomination = received();
         service.submit(nomination.id());
@@ -104,6 +106,7 @@ class SubmitToAbmServiceTest {
     }
 
     @Test
+    @Tag("E3")
     void alreadyResolvedIsSkippedWithoutCallingAbm() {
         var nomination = received();
         approveConcurrently(nomination.id());
@@ -116,6 +119,7 @@ class SubmitToAbmServiceTest {
     }
 
     @Test
+    @Tag("E6")
     void abmFailurePropagatesAndKeepsReceived() {
         var nomination = received();
         abm.failure = new AbmUnavailableException("timeout", null);
@@ -126,6 +130,7 @@ class SubmitToAbmServiceTest {
     }
 
     @Test
+    @Tag("E6")
     void abmContractErrorIsCountedAndPropagated() {
         var nomination = received();
         abm.failure = new AbmContractException("400 Bad Request");

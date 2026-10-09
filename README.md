@@ -304,6 +304,36 @@ Detalle completo, SLIs/SLOs e indicadores que anticipan degradación: [`docs/obs
 | **Alertas** | 17 reglas Prometheus en [`ops/prometheus/alerts.yml`](ops/prometheus/alerts.yml), cada una con su runbook: circuit breaker abierto, tasa de ABM no disponible, outbox atrasado o fallando, mensajes en DLT, nominaciones trabadas, latencia p95, 5xx, lag de consumers, conflictos de ABM. |
 | **Tablero** | Grafana "Nominaciones – visión operativa" ([`ops/grafana/dashboards/nominations.json`](ops/grafana/dashboards/nominations.json)), provisionado automáticamente. |
 
+## Escalamiento (E10)
+
+`E10PeakVolumeIntegrationTest` dispara una ráfaga concurrente de casi 300 POST desde 8 entidades, con reintentos
+simultáneos del mismo `request_id`, y corre el relay del outbox como 4 réplicas en paralelo. Verifica que:
+
+- todas las respuestas son 202, sin 5xx, y cada `request_id` da una sola nominación;
+- todas llegan a estado final en unos 2 s;
+- hay exactamente un `nomination.requested.v1` y un `nomination.result.v1` por nominación, leídos hasta el high
+  watermark: `FOR UPDATE SKIP LOCKED` reparte las filas entre réplicas sin publicar nada dos veces;
+- el `correlation_id` está en el historial y en los headers de ambos eventos;
+- los mensajes se reparten entre las 6 particiones y cada nominación cae en la misma partición en los tres
+  tópicos, así que el orden por nominación se conserva.
+
+`scripts/load-test.sh` reproduce el pico en vivo junto con Grafana. En una laptop, 2000 altas con concurrencia 50
+dieron p95 de 116 ms y drenaron en menos de 9 s.
+
+**Qué cambia al multiplicar por cien** (de 10k a 1M por día: unas 12 req/s de media, 100–200 req/s en pico):
+
+- La API es stateless y escala horizontalmente detrás del balanceador.
+- El relay escala por instancias gracias a SKIP LOCKED. En producción, publicación por lotes (enviar el lote y
+  esperar los futures juntos) o Debezium (CDC).
+- Los consumidores escalan por particiones: subir a 24–48 particiones, replication factor 3 con `min.insync.replicas=2`,
+  y hacer configurable la concurrencia de los listeners (hoy 1 consumer por listener por instancia).
+- Pool de Hikari y `batch-size` del relay fijados explícitamente. Purga o particionado por fecha de `outbox_events`
+  y `nomination_history`.
+- La idempotencia y el orden no dependen de la cantidad de instancias: los garantizan la UNIQUE
+  `(entity_id, request_id)`, la deduplicación por `event_id` y la key `nomination_id`.
+- El circuit breaker y los reintentos no bloqueantes aíslan la presión sobre ABM.
+- La capacidad se vigila con el backlog del outbox, las nominaciones abiertas, el lag de consumers y el p95.
+
 ## Estructura
 
 ```
@@ -315,25 +345,67 @@ app/src/main/java/com/prisma/nominations
 
 ## Cómo correr
 
-Requisitos: Java 21, Maven y Docker.
+Requisitos: Docker. Para correr la app en el host o los tests, además Java 21 y Maven.
 
 ```bash
-# Opción A: infraestructura con docker-compose y la app local
-docker compose up -d
+# Modo A: todo en Docker (app + Postgres + Kafka + observabilidad), con el perfil demo
+docker compose up -d --build            # la app queda healthy en ~20 s; APP_PORT=9080 para cambiar el puerto
+docker compose logs -f app              # logs JSON (ECS) con correlationId y traceId
+
+# Modo B: app en el host (desarrollo) y el resto en Docker
+APP_RUNS_ON=host docker compose up -d postgres kafka kafka-ui jaeger prometheus grafana
 cd app && mvn spring-boot:run
 
-# Opción B: sin compose, Postgres y Kafka con Testcontainers
+# Sin compose: Postgres y Kafka con Testcontainers
 cd app && mvn spring-boot:test-run
 
-# Tests (requieren Docker corriendo)
-cd app && mvn verify
+# Bajar todo (-v borra también los datos)
+docker compose down
 ```
+
+`APP_RUNS_ON=host` solo cambia el target de Prometheus (de `app:8080` a `host.docker.internal:8080`). Si Prometheus
+ya estaba levantado en el otro modo: `APP_RUNS_ON=host docker compose up -d prometheus`.
+
+La imagen (`app/Dockerfile`) es multi-stage: build con Maven, runtime JRE 21 Alpine, jar por capas, usuario no root,
+`MaxRAMPercentage=75` y healthcheck contra `/actuator/health`.
 
 - API: http://localhost:8080 (con token: ver [Seguridad](#seguridad)) · Swagger: http://localhost:8080/swagger-ui.html
 - Health: http://localhost:8080/actuator/health · Métricas: http://localhost:8080/actuator/prometheus
 - Kafka UI: http://localhost:8081
 - Grafana: http://localhost:3000 (admin/admin; si el puerto está ocupado: `GRAFANA_PORT=3001 docker compose up -d`)
-- Prometheus: http://localhost:9090 (alertas en `/alerts`) · Jaeger: http://localhost:16686
+- Prometheus: http://localhost:9090 (alertas en `/alerts`, targets en `/targets`) · Jaeger: http://localhost:16686
+
+## Pruebas
+
+Cada escenario del enunciado (E1–E10) tiene sus tests etiquetados con `@Tag("En")`. Los que levantan Spring y
+Testcontainers llevan además `@Tag("integration")` y requieren Docker.
+
+```bash
+cd app
+mvn test -Dgroups=E6                    # un escenario
+mvn test -Dgroups='E4 | E5 | E7'        # varios
+mvn test -DexcludedGroups=integration   # solo unitarios, sin Docker
+mvn test                                # suite completa (~3-4 min)
+```
+
+Matriz escenario → diseño → tests → cómo verlo en la demo: [`docs/scenarios.md`](docs/scenarios.md).
+
+## Demo
+
+Guion de la presentación (10–12 min, qué decir y mostrar en cada escenario, plan B): [`docs/demo.md`](docs/demo.md).
+
+```bash
+docker compose up -d --build          # la app corre con el perfil demo (tiempos comprimidos)
+scripts/demo.sh                       # E1 → E10 con checklist ✓/✗ al final
+scripts/demo.sh E6                    # un solo escenario
+DEMO_PAUSE=1 scripts/demo.sh          # Enter entre pasos (modo presentación)
+scripts/load-test.sh 2000 50          # pico de volumen para ver en Grafana
+```
+
+El perfil `demo` (`application-demo.yml`) comprime los tiempos para mostrarlos en vivo: ABM responde en 3 s, el
+sweeper marca timeout a los 30 s y el circuit breaker se reabre a los 10 s. E8 (Kafka caído → outbox) y E9
+(consumidor caído → lag y recuperación) apagan servicios del compose; sin compose se marcan como saltados y su
+evidencia es `mvn test -Dgroups=E8` / `-Dgroups=E9`.
 
 ## API
 
@@ -388,4 +460,4 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 - [x] Fase 5 — ABM mock + respuesta
 - [x] Fase 6 — Resiliencia
 - [x] Fase 7 — Seguridad y observabilidad
-- [ ] Fase 8 — E2E y entrega
+- [x] Fase 8 — E2E y entrega

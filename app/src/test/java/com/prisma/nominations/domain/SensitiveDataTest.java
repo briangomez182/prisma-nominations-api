@@ -1,5 +1,6 @@
 package com.prisma.nominations.domain;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -11,6 +12,7 @@ class SensitiveDataTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"4111111111111111", "4111 1111 1111 1111", "4111-1111-1111-1111", "5500000000000004"})
+    @Tag("E2")
     void cardTokenRejectsFullPan(String pan) {
         assertThatThrownBy(() -> new CardToken(pan))
                 .isInstanceOf(InvalidNominationDataException.class)
@@ -30,6 +32,7 @@ class SensitiveDataTest {
     }
 
     @Test
+    @Tag("E2")
     void accountIdRejectsInvalidFormat() {
         assertThatThrownBy(() -> new AccountId("98-76"))
                 .isInstanceOf(InvalidNominationDataException.class)

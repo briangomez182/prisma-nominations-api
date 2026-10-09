@@ -15,6 +15,7 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -64,6 +65,7 @@ import static org.hamcrest.Matchers.equalTo;
         "nominations.abm-mock.response-delay=300ms",
         "nominations.abm-mock.duplicate-gap=100ms"})
 @Import({TestcontainersConfiguration.class, AbmFlowIntegrationTest.AbmRequestRecorder.class})
+@Tag("integration")
 class AbmFlowIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
@@ -86,6 +88,7 @@ class AbmFlowIntegrationTest {
 
     @Nested
     @DisplayName("E4 - ABM aprueba: APPROVED, historial completo y un único nomination.result")
+    @Tag("E4")
     class E4Approved {
 
         @Test
@@ -120,6 +123,7 @@ class AbmFlowIntegrationTest {
 
     @Nested
     @DisplayName("E5 - ABM rechaza: REJECTED con motivo normalizado, sin exponer el código de ABM")
+    @Tag("E5")
     class E5Rejected {
 
         @Test
@@ -151,6 +155,7 @@ class AbmFlowIntegrationTest {
 
     @Nested
     @DisplayName("E7 - ABM responde dos veces: un solo cambio de estado y un solo nomination.result")
+    @Tag("E7")
     class E7DuplicateResponse {
 
         @Test
@@ -188,6 +193,7 @@ class AbmFlowIntegrationTest {
 
     @Nested
     @DisplayName("Sin doble envío: ABM recibe cada nominación una sola vez, aunque el canal reintente")
+    @Tag("E3")
     class NoDoubleSubmission {
 
         @Test
@@ -211,6 +217,7 @@ class AbmFlowIntegrationTest {
 
     @Nested
     @DisplayName("E6 - ABM no responde (SILENT): queda en PENDING_ABM mientras no venza el SLA")
+    @Tag("E6")
     class E6SilentAbm {
 
         /**
@@ -239,6 +246,7 @@ class AbmFlowIntegrationTest {
 
     @Nested
     @DisplayName("Trazabilidad: el correlation_id del POST llega al historial y a nomination.result.v1")
+    @Tag("E1")
     class Traceability {
 
         @Test

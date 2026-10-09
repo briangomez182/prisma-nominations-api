@@ -8,6 +8,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.client.RestClient;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Decorador + {@link AbmHttpClient} real contra un servidor HTTP embebido (JDK): intentos y timeouts reales.
  */
+@Tag("E6")
 class ResilientAbmClientHttpTest {
 
     private static final Duration READ_TIMEOUT = Duration.ofMillis(300);

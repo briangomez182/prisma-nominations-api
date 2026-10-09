@@ -10,6 +10,7 @@ import com.prisma.nominations.domain.AbmDecision;
 import com.prisma.nominations.domain.ResolutionOutcome;
 import com.prisma.nominations.infrastructure.adapter.in.web.ApiHeaders;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -46,6 +47,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "nominations.outbox.relay.enabled=false"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
+@Tag("E6")
 class AbmTimeoutRecoveryIntegrationTest {
 
     private static final String REPROCESS = "/internal/v1/nominations/{id}/reprocess";

@@ -1,4 +1,7 @@
-# Prometheus de la demo: scrapea la app que corre en el host (mvn spring-boot:run, puerto 8080).
+# Prometheus de la demo: scrapea la app en Docker (app:8080) o en el host (host.docker.internal:8080).
+# El target lo elige docker-compose.yml montando ops/prometheus/targets/${APP_RUNS_ON:-docker}.yml como
+# /etc/prometheus-targets/app.yml: un único target por modo, así la alerta NominationsApiDown no queda disparada por
+# el modo que no se usa y las métricas no se duplican.
 # /actuator/prometheus queda sin token en la demo; en producción va por red interna o con credenciales de scrape.
 global:
   scrape_interval: 15s
@@ -17,10 +20,9 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     scrape_interval: 15s
     scrape_timeout: 10s
-    static_configs:
-      - targets: ["host.docker.internal:8080"]
-        labels:
-          service: prisma-nominations-api
+    file_sd_configs:
+      - files: ["/etc/prometheus-targets/app.yml"]
+        refresh_interval: 1m
 
   - job_name: prometheus
     static_configs:

@@ -1,9 +1,45 @@
-# Infraestructura local para desarrollo: PostgreSQL + Kafka (KRaft, sin ZooKeeper) + Kafka UI
+# Stack local completo: la app (prisma-nominations-api) + PostgreSQL + Kafka (KRaft, sin ZooKeeper) + Kafka UI
 # y el stack de observabilidad: Jaeger (trazas OTLP), Prometheus (métricas + alertas) y Grafana (tableros).
-# La app corre fuera de Docker (mvn spring-boot:run). En la fase 8 se agrega el servicio de la app.
-# URLs: Grafana http://localhost:3000 (admin/admin) · Prometheus http://localhost:9090
+#
+# Dos modos:
+#   a) Todo en Docker:     docker compose up -d --build
+#   b) App en el host:     APP_RUNS_ON=host docker compose up -d postgres kafka kafka-ui jaeger prometheus grafana
+#                          cd app && mvn spring-boot:run
+#      APP_RUNS_ON=host hace que Prometheus scrapee host.docker.internal:8080 en vez de app:8080 (un solo target por
+#      modo: si scrapeara ambos, en Docker Desktop host.docker.internal:8080 llega al puerto publicado del contenedor
+#      y las métricas se duplicarían).
+# URLs: API http://localhost:8080 · Grafana http://localhost:3000 (admin/admin) · Prometheus http://localhost:9090
 #       Jaeger http://localhost:16686 · Kafka UI http://localhost:8081 — ver docs/observability.md
 services:
+  app:
+    build: ./app
+    image: prisma-nominations-api:local
+    environment:
+      # Perfiles: demo (application-demo.yml) + logs JSON ECS (application-json-logs.yml).
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-demo,json-logs}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/nominations
+      SPRING_DATASOURCE_USERNAME: nominations
+      SPRING_DATASOURCE_PASSWORD: nominations
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092          # listener INTERNAL del broker
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
+      # SOLO DEMO: la misma clave default de application.yml / scripts/mint-token.sh. Sobreescribible desde el shell.
+      NOMINATIONS_SECURITY_JWT_SECRET: ${NOMINATIONS_SECURITY_JWT_SECRET:-PaMXbHK/6wehI0TgMBIYHUm7EjsB+82m10nGxpXDpYE=}
+      # El mock de ABM se llama a sí mismo por http://localhost:${local.server.port}/abm-mock (mismo contenedor).
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1g                 # el heap toma el 75% (MaxRAMPercentage en el Dockerfile)
+    stop_grace_period: 30s           # server.shutdown=graceful: termina los requests en curso
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -55,7 +91,7 @@ services:
       kafka:
         condition: service_healthy
 
-  # Trazas: la app exporta OTLP HTTP a http://localhost:4318/v1/traces. Almacenamiento en memoria (demo).
+  # Trazas: la app exporta OTLP HTTP a http://jaeger:4318/v1/traces (en el host: localhost:4318). En memoria (demo).
   jaeger:
     image: jaegertracing/all-in-one:1.62.0
     environment:
@@ -66,7 +102,8 @@ services:
       - "4317:4317"     # OTLP gRPC
       - "4318:4318"     # OTLP HTTP
 
-  # Métricas y alertas: scrapea /actuator/prometheus de la app que corre en el host.
+  # Métricas y alertas: scrapea /actuator/prometheus de la app. El target sale de ops/prometheus/targets/<modo>.yml:
+  # docker (default, app:8080) u host (APP_RUNS_ON=host → host.docker.internal:8080).
   prometheus:
     image: prom/prometheus:v2.55.1
     command:
@@ -76,6 +113,7 @@ services:
       - --web.enable-lifecycle          # POST /-/reload para recargar config y reglas sin reiniciar
     volumes:
       - ./ops/prometheus:/etc/prometheus:ro
+      - ./ops/prometheus/targets/${APP_RUNS_ON:-docker}.yml:/etc/prometheus-targets/app.yml:ro
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"   # Linux; en Docker Desktop ya existe

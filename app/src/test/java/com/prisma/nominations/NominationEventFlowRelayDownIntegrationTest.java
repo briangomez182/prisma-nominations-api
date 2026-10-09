@@ -5,6 +5,7 @@ import com.prisma.nominations.infrastructure.adapter.out.messaging.OutboxRelay;
 import com.prisma.nominations.infrastructure.config.KafkaTopics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -39,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"nominations.outbox.relay.enabled=false", "nominations.abm.adapter.enabled=false"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class NominationEventFlowRelayDownIntegrationTest {
 
     @Autowired
@@ -54,6 +56,7 @@ class NominationEventFlowRelayDownIntegrationTest {
 
     @Nested
     @DisplayName("E8 - consistencia estado ↔ publicación con Kafka sin publicar")
+    @Tag("E8")
     class E8StateAndPublicationConsistency {
 
         @Test

@@ -9,6 +9,7 @@ import com.prisma.nominations.infrastructure.adapter.out.messaging.OutboxRelay;
 import com.prisma.nominations.infrastructure.config.KafkaTopics;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,8 @@ import static org.awaitility.Awaitility.await;
         "management.otlp.tracing.export.enabled=false"})
 @AutoConfigureObservability
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
+@Tag("E1")
 class EndToEndTraceIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);

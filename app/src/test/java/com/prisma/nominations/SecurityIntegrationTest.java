@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prisma.nominations.infrastructure.adapter.in.web.ApiHeaders;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -49,6 +50,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
         "nominations.outbox.relay.enabled=false"})
 @AutoConfigureObservability(tracing = false)
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class SecurityIntegrationTest {
 
     private static final String BASE = "/v1/nominations";

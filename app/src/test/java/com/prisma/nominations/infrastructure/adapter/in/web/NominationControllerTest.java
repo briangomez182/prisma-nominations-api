@@ -13,6 +13,7 @@ import com.prisma.nominations.domain.NominationStatus;
 import com.prisma.nominations.domain.RejectionReason;
 import com.prisma.nominations.domain.StatusChange;
 import com.prisma.nominations.infrastructure.config.SecurityConfig;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,6 +71,7 @@ class NominationControllerTest {
     private GetNominationQuery getNomination;
 
     @Test
+    @Tag("E1")
     void postNewNominationReturns202WithLocationAndMaskedBody() throws Exception {
         when(createNomination.create(any())).thenReturn(new CreateNominationResult(received(), false));
 
@@ -94,6 +96,7 @@ class NominationControllerTest {
     }
 
     @Test
+    @Tag("E3")
     void postReplayStillReturns202AndFlagsReplay() throws Exception {
         when(createNomination.create(any())).thenReturn(new CreateNominationResult(received(), true));
 
@@ -132,6 +135,7 @@ class NominationControllerTest {
     }
 
     @Test
+    @Tag("E2")
     void postWithoutRequiredFieldsReturns400AndDoesNotCallUseCase() throws Exception {
         mockMvc.perform(post("/v1/nominations")
                         .with(TestTokens.jwt(ENTITY, TestTokens.WRITE))
@@ -143,6 +147,7 @@ class NominationControllerTest {
     }
 
     @Test
+    @Tag("E2")
     void postWithOversizedFieldReturns400AndDoesNotCallUseCase() throws Exception {
         var body = VALID_BODY.replace("0001234567890987654", "A".repeat(35));
 

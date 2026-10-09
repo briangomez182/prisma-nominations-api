@@ -15,6 +15,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,6 +71,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
+@Tag("integration")
 class NominationEventFlowIntegrationTest {
 
     static final String BASE = "/v1/nominations";
@@ -99,6 +101,7 @@ class NominationEventFlowIntegrationTest {
 
     @Nested
     @DisplayName("E1 - flujo completo de ingreso: POST → outbox → nomination.requested.v1")
+    @Tag("E1")
     class E1RequestedEventPublished {
 
         @Test
@@ -148,6 +151,7 @@ class NominationEventFlowIntegrationTest {
 
     @Nested
     @DisplayName("E3 - reintentos del canal: exactamente un mensaje por nominación")
+    @Tag("E3")
     class E3OneMessagePerNomination {
 
         @Test
@@ -191,6 +195,7 @@ class NominationEventFlowIntegrationTest {
 
     @Nested
     @DisplayName("E9 + resultado único: nomination.result.v1 → consumidor con dedup")
+    @Tag("E9")
     class E9ResultConsumedOnce {
 
         @Test
@@ -277,6 +282,7 @@ class NominationEventFlowIntegrationTest {
 
     @Nested
     @DisplayName("Trazabilidad: el mismo correlation_id de punta a punta")
+    @Tag("E1")
     class Traceability {
 
         @Test

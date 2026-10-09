@@ -4,6 +4,7 @@ import com.prisma.nominations.TestcontainersConfiguration;
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
 import com.prisma.nominations.application.port.in.CreateNominationResult;
 import com.prisma.nominations.application.port.in.CreateNominationUseCase;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(properties = "nominations.abm.adapter.enabled=false")
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
+@Tag("E3")
 class NominationCommandServiceConcurrencyTest {
 
     private static final int THREADS = 10;

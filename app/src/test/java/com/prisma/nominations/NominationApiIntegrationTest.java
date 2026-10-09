@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prisma.nominations.infrastructure.adapter.in.web.ApiHeaders;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -44,6 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = "nominations.abm.adapter.enabled=false")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class NominationApiIntegrationTest {
 
     private static final String BASE = "/v1/nominations";
@@ -60,6 +62,7 @@ class NominationApiIntegrationTest {
 
     @Nested
     @DisplayName("E1 - alta válida")
+    @Tag("E1")
     class E1ValidNomination {
 
         @Test
@@ -108,6 +111,7 @@ class NominationApiIntegrationTest {
 
     @Nested
     @DisplayName("E2 - solicitud inválida: 400 y nada persistido")
+    @Tag("E2")
     class E2InvalidRequest {
 
         @Test
@@ -171,6 +175,7 @@ class NominationApiIntegrationTest {
 
     @Nested
     @DisplayName("E3 - idempotencia por (entidad, request_id)")
+    @Tag("E3")
     class E3Idempotency {
 
         @Test

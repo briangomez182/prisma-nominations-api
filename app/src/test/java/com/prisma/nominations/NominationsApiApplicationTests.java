@@ -1,5 +1,6 @@
 package com.prisma.nominations;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -11,6 +12,7 @@ import org.springframework.context.annotation.Import;
  */
 @SpringBootTest(properties = "nominations.abm.adapter.enabled=false")
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
 class NominationsApiApplicationTests {
 
     @Test

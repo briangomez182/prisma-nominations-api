@@ -19,6 +19,7 @@ import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,6 +75,7 @@ import static org.awaitility.Awaitility.await;
 @AutoConfigureObservability
 @ActiveProfiles("json-logs")
 @Import({TestcontainersConfiguration.class, DistributedTracingIntegrationTest.ProbeConfig.class})
+@Tag("integration")
 class DistributedTracingIntegrationTest {
 
     private static final Logger log = LoggerFactory.getLogger(DistributedTracingIntegrationTest.class);
@@ -122,6 +124,7 @@ class DistributedTracingIntegrationTest {
     }
 
     @Test
+    @Tag("E1")
     void outboxGuardaElTraceparentYElConsumerContinuaLaMismaTraza() throws Exception {
         String correlationId = "it-trace-" + UUID.randomUUID();
         var canal = inSpan(correlationId, () -> createNomination.create(command(correlationId)));
@@ -154,6 +157,7 @@ class DistributedTracingIntegrationTest {
     }
 
     @Test
+    @Tag("E1")
     void sinSpanActivoElOutboxNoGuardaTraceparent() throws Exception {
         String correlationId = "it-notrace-" + UUID.randomUUID();
         assertThat(tracer.currentSpan()).isNull();
@@ -166,6 +170,7 @@ class DistributedTracingIntegrationTest {
     }
 
     @Test
+    @Tag("E1")
     void elClienteHttpDeAbmPropagaElTraceparent() {
         String correlationId = "it-abm-" + UUID.randomUUID();
         var request = new AbmRequest(UUID.randomUUID(), UUID.randomUUID(), correlationId, "ENT01", "123456",
@@ -185,6 +190,7 @@ class DistributedTracingIntegrationTest {
      * mismo encoder que usa Boot ({@link StructuredLogEncoder}) y el formato que resolvió el Environment del perfil.
      */
     @Test
+    @Tag("E1")
     void conElPerfilJsonLogsCadaLineaEsJsonConCorrelationIdYTraceId() throws Exception {
         String format = environment.getProperty("logging.structured.format.console");
         assertThat(format).isEqualTo("ecs");

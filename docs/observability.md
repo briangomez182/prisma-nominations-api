@@ -16,8 +16,12 @@ alertas y qué hacer ante cada una están en el [runbook](operations.md#alertas)
 ## Levantar el stack
 
 ```bash
-docker compose up -d                       # postgres, kafka, kafka-ui, jaeger, prometheus, grafana
-cd app && mvn spring-boot:run              # la app corre en el host (8080) y Prometheus la scrapea
+# a) Todo en Docker (app incluida): Prometheus scrapea app:8080
+docker compose up -d --build
+
+# b) App en el host: infraestructura en Docker y Prometheus apuntando a host.docker.internal:8080
+APP_RUNS_ON=host docker compose up -d postgres kafka kafka-ui jaeger prometheus grafana
+cd app && mvn spring-boot:run
 ```
 
 | Servicio | URL | Notas |
@@ -28,8 +32,14 @@ cd app && mvn spring-boot:run              # la app corre en el host (8080) y Pr
 | Kafka UI | http://localhost:8081 | Tópicos, DLT, consumer groups y lag |
 | Métricas crudas | http://localhost:8080/actuator/prometheus | Sin token en la demo (en producción: red interna o credenciales de scrape) |
 
-Prometheus llega a la app por `host.docker.internal:8080` (en Linux, vía `extra_hosts: host-gateway`). Si el target
-figura `DOWN` en `/targets`, la app no está corriendo o no escucha en 8080. Para recargar reglas sin reiniciar:
+Prometheus tiene un único target por modo, elegido por `APP_RUNS_ON` (default `docker`): `docker-compose.yml` monta
+[`ops/prometheus/targets/<modo>.yml`](../ops/prometheus/targets) como archivo de `file_sd`. En modo `docker` el
+target es `app:8080`; en modo `host`, `host.docker.internal:8080` (en Linux, vía `extra_hosts: host-gateway`). Las
+series llevan la etiqueta `runs_on`. No se scrapean los dos a la vez: en Docker Desktop `host.docker.internal:8080`
+también llega al puerto publicado del contenedor y las métricas se duplicarían, y el target del modo que no se usa
+dejaría `NominationsApiDown` disparada siempre. Si el target figura `DOWN` en `/targets`, la app no está corriendo o
+el modo no coincide (p.ej. app en el host con Prometheus levantado sin `APP_RUNS_ON=host`: recrearlo con
+`APP_RUNS_ON=host docker compose up -d prometheus`). Para recargar reglas sin reiniciar:
 `curl -X POST http://localhost:9090/-/reload`.
 
 ## SLIs y SLOs propuestos

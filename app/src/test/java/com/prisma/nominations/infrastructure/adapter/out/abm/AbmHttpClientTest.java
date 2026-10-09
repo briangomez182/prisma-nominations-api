@@ -9,6 +9,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.client.RestClient;
@@ -110,6 +111,7 @@ class AbmHttpClientTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("503 y 500 → AbmUnavailableException")
     void serverError_isUnavailable() throws Exception {
         for (int status : new int[]{503, 500}) {
@@ -124,6 +126,7 @@ class AbmHttpClientTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("429 → AbmUnavailableException (transitorio, no es error de contrato)")
     void tooManyRequests_isUnavailable() throws Exception {
         environment.setProperty(AbmHttpClient.BASE_URL_PROPERTY, server(new CopyOnWriteArrayList<>(), 429, "{}"));
@@ -143,6 +146,7 @@ class AbmHttpClientTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("timeout de lectura → AbmUnavailableException, sin esperar más que el read-timeout")
     void readTimeout_isUnavailable() throws Exception {
         HttpServer server = newServer();
@@ -166,6 +170,7 @@ class AbmHttpClientTest {
     }
 
     @Test
+    @Tag("E6")
     @DisplayName("conexión rechazada → AbmUnavailableException")
     void connectionRefused_isUnavailable() throws Exception {
         int freePort;

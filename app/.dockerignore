@@ -1,0 +1,14 @@
+# Contexto de build de la imagen: solo pom.xml y src/ hacen falta.
+target/
+**/target/
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+.mvn/wrapper/maven-wrapper.jar
+*.log
+.DS_Store
+Dockerfile
+.dockerignore

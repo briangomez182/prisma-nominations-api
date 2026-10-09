@@ -9,6 +9,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -37,6 +38,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "management.health.circuitbreakers.enabled=true",
         "management.endpoint.health.show-details=always"})
 @Import(TestcontainersConfiguration.class)
+@Tag("integration")
+@Tag("E6")
 class AbmCircuitBreakerHealthIntegrationTest {
 
     @LocalServerPort

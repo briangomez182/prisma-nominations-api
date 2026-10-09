@@ -1,0 +1,5 @@
+# Modo "app en el host" (APP_RUNS_ON=host): mvn spring-boot:run escuchando en el 8080 del host.
+- targets: ["host.docker.internal:8080"]
+  labels:
+    service: prisma-nominations-api
+    runs_on: host

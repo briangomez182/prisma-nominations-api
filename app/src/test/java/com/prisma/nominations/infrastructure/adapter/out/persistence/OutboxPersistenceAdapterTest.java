@@ -9,6 +9,7 @@ import com.prisma.nominations.domain.AbmDecision;
 import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.Nomination;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -39,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @ImportAutoConfiguration(JacksonAutoConfiguration.class)
 @Import({PostgresTestcontainersConfiguration.class, OutboxPersistenceAdapter.class, NominationPersistenceAdapter.class})
+@Tag("integration")
 class OutboxPersistenceAdapterTest {
 
     private static final Instant NOW = Instant.parse("2026-10-08T12:00:00Z");
@@ -129,6 +131,7 @@ class OutboxPersistenceAdapterTest {
     }
 
     @Test
+    @Tag("E8")
     void rollbackDiscardsNominationAndEvent() {
         var nomination = newNomination();
 
@@ -144,6 +147,7 @@ class OutboxPersistenceAdapterTest {
     }
 
     @Test
+    @Tag("E8")
     void appendOutsideTransactionFails() {
         var event = NominationRequested.of(newNomination(), NOW);
 
@@ -152,6 +156,7 @@ class OutboxPersistenceAdapterTest {
     }
 
     @Test
+    @Tag("E7")
     void onlyOneResultPerNomination() {
         var nomination = approved();
         tx().executeWithoutResult(status -> outbox.append(NominationResult.of(nomination, NOW)));
