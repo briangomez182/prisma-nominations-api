@@ -1,6 +1,7 @@
 package com.prisma.nominations.infrastructure.adapter.out.persistence;
 
 import com.prisma.nominations.PostgresTestcontainersConfiguration;
+import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.domain.AbmDecision;
 import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
@@ -14,7 +15,6 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.time.Instant;
@@ -67,7 +67,7 @@ class NominationPersistenceAdapterTest {
 
         adapter.save(newNomination("ENT02", requestId));
         assertThatThrownBy(() -> adapter.save(newNomination("ENT01", requestId)))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DuplicateNominationException.class);
     }
 
     @Test

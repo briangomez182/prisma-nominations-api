@@ -1,10 +1,13 @@
 package com.prisma.nominations.infrastructure.adapter.out.persistence;
 
+import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.StatusChange;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +17,9 @@ import java.util.UUID;
 
 @Component
 class NominationPersistenceAdapter implements NominationRepository {
+
+    /** Clave de idempotencia en la base (V1__create_nominations_schema.sql). */
+    static final String IDEMPOTENCY_CONSTRAINT = "uq_nominations_entity_request";
 
     private final NominationJpaRepository nominations;
     private final NominationHistoryJpaRepository history;
@@ -25,13 +31,22 @@ class NominationPersistenceAdapter implements NominationRepository {
 
     /**
      * Estado e historial en la misma transacción. El flush inmediato hace que el lock optimista y la
-     * unicidad fallen acá, y que la versión devuelta sea la definitiva.
+     * unicidad fallen acá, y que la versión devuelta sea la definitiva. La violación de la clave de
+     * idempotencia se traduce a {@link DuplicateNominationException}; cualquier otra se propaga igual.
      */
     @Override
     @Transactional
     public Nomination save(Nomination nomination) {
         var changes = nomination.pullPendingChanges();
-        var saved = nominations.saveAndFlush(toEntity(nomination));
+        NominationJpaEntity saved;
+        try {
+            saved = nominations.saveAndFlush(toEntity(nomination));
+        } catch (DataIntegrityViolationException e) {
+            if (violates(e, IDEMPOTENCY_CONSTRAINT)) {
+                throw new DuplicateNominationException(e);
+            }
+            throw e;
+        }
         history.saveAll(changes.stream().map(NominationPersistenceAdapter::toEntity).toList());
         return toDomain(saved);
     }
@@ -54,6 +69,15 @@ class NominationPersistenceAdapter implements NominationRepository {
         return history.findByNominationIdOrderByOccurredAtAscIdAsc(nominationId).stream()
                 .map(NominationPersistenceAdapter::toDomain)
                 .toList();
+    }
+
+    private static boolean violates(DataIntegrityViolationException e, String constraint) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof ConstraintViolationException cve && constraint.equalsIgnoreCase(cve.getConstraintName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static NominationJpaEntity toEntity(Nomination n) {

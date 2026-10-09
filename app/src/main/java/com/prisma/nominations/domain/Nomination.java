@@ -1,6 +1,7 @@
 package com.prisma.nominations.domain;
 
 import java.time.Instant;
+import java.util.regex.Pattern;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -36,7 +37,7 @@ public final class Nomination {
                        NominationStatus status, RejectionReason rejectionReason, String abmReasonCode,
                        Instant updatedAt, Long version) {
         this.id = Objects.requireNonNull(id, "id");
-        this.entityId = requireText(entityId, "entity_id");
+        this.entityId = requireEntityId(entityId);
         this.requestId = requirePresent(requestId, "request_id");
         this.customerId = requireText(customerId, "customer_id");
         this.accountId = requirePresent(accountId, "account_id");
@@ -133,6 +134,18 @@ public final class Nomination {
 
     private void record(NominationStatus from, NominationStatus to, ChangeSource source, String detail, Instant now) {
         pendingChanges.add(new StatusChange(id, from, to, source, detail, correlationId, now));
+    }
+
+    private static final Pattern ENTITY_ID = Pattern.compile("[A-Za-z0-9_-]{1,20}");
+
+    /** Viene del canal (hoy header, luego JWT): se valida antes de llegar a la base, que admite hasta 20. */
+    private static String requireEntityId(String value) {
+        requireText(value, "entity_id");
+        if (!ENTITY_ID.matcher(value).matches()) {
+            throw new InvalidNominationDataException("entity_id",
+                    "entity_id debe tener entre 1 y 20 caracteres alfanuméricos, '_' o '-'");
+        }
+        return value;
     }
 
     private static String requireText(String value, String field) {

@@ -115,11 +115,51 @@ cd app && mvn verify
 - Health: http://localhost:8080/actuator/health
 - Kafka UI: http://localhost:8081
 
+## API
+
+Contrato completo: [`docs/openapi.yaml`](docs/openapi.yaml) · Swagger UI: http://localhost:8080/swagger-ui.html · Ejemplos: [`docs/requests.http`](docs/requests.http) (IntelliJ HTTP Client).
+
+| Método | Ruta | Respuesta |
+|--------|------|-----------|
+| `POST` | `/v1/nominations` | **202** + `Location` + `Idempotent-Replayed: true\|false`. Body con `status: RECEIVED` |
+| `GET` | `/v1/nominations/{id}` | **200** estado actual (`account_id` y `card_id` enmascarados) |
+| `GET` | `/v1/nominations/{id}/history` | **200** transiciones en orden cronológico |
+
+Headers:
+
+- `X-Entity-Id` (obligatorio): entidad que llama. Aísla los datos (otra entidad → 404) y forma parte de la clave de idempotencia `(entity_id, request_id)`. Transitorio: en la fase de seguridad sale del JWT.
+- `X-Correlation-Id` (opcional): si falta o no cumple `[A-Za-z0-9._-]{1,64}` se genera. Vuelve siempre en la respuesta.
+- `Idempotent-Replayed` (respuesta del POST): `true` si se devolvió una nominación ya existente para el mismo `request_id`.
+
+Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `timestamp` y `errors[{field, message}]` (campos en snake_case, nunca con el valor recibido). `type` = `https://api.prisma.example/problems/<code-en-kebab-case>`.
+
+| `code` | HTTP | Cuándo |
+|--------|------|--------|
+| `VALIDATION_ERROR` | 400 | Campos faltantes o inválidos; `card_id` con forma de PAN |
+| `MALFORMED_REQUEST` | 400 | Body que no es JSON válido o campo con tipo incorrecto (p.ej. `request_id` no UUID) |
+| `MISSING_HEADER` | 400 | Falta `X-Entity-Id` |
+| `INVALID_PARAMETER` | 400 | Parámetro de ruta con formato inválido (`{id}` no UUID) |
+| `BAD_REQUEST` | 400 | Otro 400 resuelto por Spring MVC |
+| `REQUEST_ERROR` | 4xx | Otro error de cliente sin código específico |
+| `NOMINATION_NOT_FOUND` | 404 | La nominación no existe o pertenece a otra entidad |
+| `RESOURCE_NOT_FOUND` | 404 | Ruta inexistente |
+| `METHOD_NOT_ALLOWED` | 405 | Método HTTP no soportado en la ruta |
+| `NOT_ACCEPTABLE` | 406 | `Accept` que la API no puede producir |
+| `IDEMPOTENCY_CONFLICT` | 409 | `request_id` ya usado por la entidad con otro contenido |
+| `CONCURRENT_MODIFICATION` | 409 | Lock optimista: otra operación modificó la nominación; reintentar |
+| `PAYLOAD_TOO_LARGE` | 413 | Solicitud que excede el tamaño permitido |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | `Content-Type` distinto de JSON |
+| `SERVICE_UNAVAILABLE` | 503 | Servicio no disponible temporalmente; reintentar |
+| `INTERNAL_ERROR` | 500 | Error inesperado (se loguea con stack; la respuesta no expone detalles) |
+
+`docs/openapi.yaml` se regenera desde el test de integración (requiere Docker):
+`cd app && mvn test -Dtest='NominationApiIntegrationTest*'` (también se actualiza con cualquier `mvn test`).
+
 ## Avance
 
 - [x] Fase 1 — Bootstrap y decisiones
 - [x] Fase 2 — Dominio y base
-- [ ] Fase 3 — API
+- [x] Fase 3 — API
 - [ ] Fase 4 — Outbox + Kafka
 - [ ] Fase 5 — ABM mock + respuesta
 - [ ] Fase 6 — Resiliencia

@@ -1,0 +1,118 @@
+### Prisma Nominations API — ejemplos (IntelliJ HTTP Client)
+# Datos ficticios. card_id es siempre un token, nunca un PAN.
+# Correr en orden: E1 guarda el id y la URI de la nominación para los GET.
+
+@baseUrl = http://localhost:8080
+@entity = ENT01
+@otherEntity = ENT02
+
+### E1 — alta válida: 202 + Location + Idempotent-Replayed: false
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-e1-0001
+
+{
+  "request_id": "0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_4f9a2c7b8d1e",
+  "alias": "CUENTA SUELDO"
+}
+
+> {%
+    client.global.set("nominationId", response.body.nomination_id);
+    client.global.set("location", response.headers.valueOf("Location"));
+%}
+
+### Consultar estado (GET por Location)
+GET {{baseUrl}}{{location}}
+X-Entity-Id: {{entity}}
+
+### Consultar historial
+GET {{baseUrl}}/v1/nominations/{{nominationId}}/history
+X-Entity-Id: {{entity}}
+
+### E3 — replay: mismo POST → 202, mismo nomination_id, Idempotent-Replayed: true
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-e3-0001
+
+{
+  "request_id": "0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_4f9a2c7b8d1e",
+  "alias": "CUENTA SUELDO"
+}
+
+### E3 — conflicto: mismo request_id con otro contenido → 409 IDEMPOTENCY_CONFLICT
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+
+{
+  "request_id": "0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_otra_tarjeta",
+  "alias": "CUENTA SUELDO"
+}
+
+### E3 — mismo request_id en otra entidad → nominación nueva (la clave es por entidad)
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{otherEntity}}
+
+{
+  "request_id": "0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_4f9a2c7b8d1e",
+  "alias": "CUENTA SUELDO"
+}
+
+### Aislamiento — otra entidad consulta la nominación → 404 NOMINATION_NOT_FOUND
+GET {{baseUrl}}/v1/nominations/{{nominationId}}
+X-Entity-Id: {{otherEntity}}
+
+### E2 — faltan campos obligatorios → 400 VALIDATION_ERROR (errors en snake_case)
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+
+{
+  "alias": "CUENTA SUELDO"
+}
+
+### E2 — card_id con forma de PAN → 400 VALIDATION_ERROR (el valor no se devuelve)
+# 4111111111111111 es el número de prueba público de Visa, no una tarjeta real.
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+
+{
+  "request_id": "5e8c1f3a-2b7d-4c9e-a1f0-3d6b8e2c4a71",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "4111111111111111"
+}
+
+### E2 — JSON inválido → 400 MALFORMED_REQUEST
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+
+{ "request_id": "no-es-un-uuid", "customer_id": "CUST-000123",
+
+### E2 — falta X-Entity-Id → 400 MISSING_HEADER
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+
+{
+  "request_id": "9a3d7e1b-4f2c-4b8a-9e6d-1c5f7a2b8d30",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_4f9a2c7b8d1e"
+}

@@ -1,0 +1,582 @@
+openapi: 3.1.0
+info:
+  title: Prisma Nominations API
+  description: |-
+    Nominación de cuentas y tarjetas para entidades financieras.
+
+    **Flujo asincrónico**: `POST /v1/nominations` persiste la nominación en estado `RECEIVED` junto con el pedido a ABM (outbox) y responde **202 Accepted** con `Location`. ABM resuelve en minutos; el estado se consulta por `GET` (o llega por el evento `nomination.result.v1`).
+
+    **Idempotencia**: la clave es `(X-Entity-Id, request_id)`. Repetir el mismo POST devuelve la nominación original con `Idempotent-Replayed: true`; reutilizar el `request_id` con otro contenido devuelve 409.
+
+    **Errores**: RFC 9457 (`application/problem+json`) con `code` estable, `correlation_id`, `timestamp` y `errors[]` por campo.
+
+    **Datos sensibles**: `card_id` debe ser un token (se rechaza un PAN); `account_id` y `card_id` se devuelven enmascarados.
+  version: v1
+servers:
+- url: http://localhost:8080
+  description: Local
+tags:
+- name: Nominaciones
+  description: Alta asincrónica y consulta de nominaciones de cuentas y tarjetas
+paths:
+  /v1/nominations:
+    post:
+      tags:
+      - Nominaciones
+      summary: Solicitar una nominación (asincrónico)
+      description: |-
+        Persiste la nominación en `RECEIVED` y encola el pedido a ABM. Responde **202** sin esperar a ABM; el estado se consulta en `Location`.
+
+        Idempotente por `(X-Entity-Id, request_id)`: repetir el mismo POST devuelve la misma nominación (**202** con `Idempotent-Replayed: true`, sin crear ni reenviar nada). El mismo `request_id` con otro contenido devuelve **409**.
+      operationId: create
+      parameters:
+      - $ref: "#/components/parameters/X-Entity-Id"
+      - $ref: "#/components/parameters/X-Correlation-Id"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNominationRequest"
+            examples:
+              nominacion:
+                summary: Alta con card_id tokenizado
+                description: nominacion
+                value:
+                  request_id: 0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87
+                  customer_id: CUST-000123
+                  account_id: "0001234567890987654"
+                  card_id: tok_4f9a2c7b8d1e
+                  alias: CUENTA SUELDO
+        required: true
+      responses:
+        "202":
+          description: "Aceptada: nominación nueva (`Idempotent-Replayed: false`)\
+            \ o replay de una existente (`Idempotent-Replayed: true`, mismo `nomination_id`)"
+          headers:
+            Idempotent-Replayed:
+              description: '`true` si se devolvió una nominación ya existente para
+                el mismo request_id'
+              style: simple
+              schema:
+                type: boolean
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+            Location:
+              description: URI de la nominación
+              style: simple
+              schema:
+                type: string
+                example: /v1/nominations/7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NominationResponse"
+              examples:
+                recibida:
+                  description: recibida
+                  value:
+                    nomination_id: 7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23
+                    request_id: 0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87
+                    status: RECEIVED
+                    customer_id: CUST-000123
+                    account_id: '****7654'
+                    card_id: '****8d1e'
+                    alias: CUENTA SUELDO
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    created_at: 2026-10-08T12:00:00Z
+                    updated_at: 2026-10-08T12:00:00Z
+        "400":
+          description: "`VALIDATION_ERROR` (campos faltantes o inválidos, card_id\
+            \ con forma de PAN), `MALFORMED_REQUEST` (JSON inválido o tipo incorrecto)\
+            \ o `MISSING_HEADER` (falta X-Entity-Id)"
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                VALIDATION_ERROR:
+                  description: VALIDATION_ERROR
+                  value:
+                    type: https://api.prisma.example/problems/validation-error
+                    title: Datos inválidos
+                    status: 400
+                    detail: La solicitud contiene datos inválidos
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: VALIDATION_ERROR
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                    errors:
+                    - field: card_id
+                      message: "card_id parece un número de tarjeta completo: se espera\
+                        \ un token o una referencia enmascarada"
+                MALFORMED_REQUEST:
+                  description: MALFORMED_REQUEST
+                  value:
+                    type: https://api.prisma.example/problems/malformed-request
+                    title: Solicitud mal formada
+                    status: 400
+                    detail: El cuerpo de la solicitud no es JSON válido o tiene campos
+                      con tipo incorrecto
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: MALFORMED_REQUEST
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                    errors:
+                    - field: request_id
+                      message: Tipo o formato inválido
+                MISSING_HEADER:
+                  description: MISSING_HEADER
+                  value:
+                    type: https://api.prisma.example/problems/missing-header
+                    title: Header obligatorio ausente
+                    status: 400
+                    detail: Falta el header obligatorio X-Entity-Id
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: MISSING_HEADER
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+        "409":
+          description: "`IDEMPOTENCY_CONFLICT`: el request_id ya fue usado por la\
+            \ entidad con otro contenido"
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                IDEMPOTENCY_CONFLICT:
+                  description: IDEMPOTENCY_CONFLICT
+                  value:
+                    type: https://api.prisma.example/problems/idempotency-conflict
+                    title: Conflicto de idempotencia
+                    status: 409
+                    detail: El request_id ya fue utilizado con datos distintos
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: IDEMPOTENCY_CONFLICT
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+  /v1/nominations/{nominationId}:
+    get:
+      tags:
+      - Nominaciones
+      summary: Consultar el estado de una nominación
+      description: Solo devuelve nominaciones de la entidad que consulta; las de otra
+        entidad responden 404.
+      operationId: get
+      parameters:
+      - $ref: "#/components/parameters/X-Entity-Id"
+      - $ref: "#/components/parameters/X-Correlation-Id"
+      - name: nominationId
+        in: path
+        description: Id de la nominación (UUID)
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Estado actual de la nominación
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NominationResponse"
+              examples:
+                recibida:
+                  description: recibida
+                  value:
+                    nomination_id: 7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23
+                    request_id: 0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87
+                    status: RECEIVED
+                    customer_id: CUST-000123
+                    account_id: '****7654'
+                    card_id: '****8d1e'
+                    alias: CUENTA SUELDO
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    created_at: 2026-10-08T12:00:00Z
+                    updated_at: 2026-10-08T12:00:00Z
+        "400":
+          description: '`MISSING_HEADER` o `INVALID_PARAMETER` (nomination_id no es
+            UUID)'
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                MISSING_HEADER:
+                  description: MISSING_HEADER
+                  value:
+                    type: https://api.prisma.example/problems/missing-header
+                    title: Header obligatorio ausente
+                    status: 400
+                    detail: Falta el header obligatorio X-Entity-Id
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: MISSING_HEADER
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                INVALID_PARAMETER:
+                  description: INVALID_PARAMETER
+                  value:
+                    type: https://api.prisma.example/problems/invalid-parameter
+                    title: Parámetro inválido
+                    status: 400
+                    detail: Un parámetro de la solicitud tiene formato inválido
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: INVALID_PARAMETER
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                    errors:
+                    - field: nomination_id
+                      message: Formato inválido
+        "404":
+          description: "`NOMINATION_NOT_FOUND`: no existe o pertenece a otra entidad"
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                NOMINATION_NOT_FOUND:
+                  description: NOMINATION_NOT_FOUND
+                  value:
+                    type: https://api.prisma.example/problems/nomination-not-found
+                    title: Nominación inexistente
+                    status: 404
+                    detail: No existe la nominación solicitada
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: NOMINATION_NOT_FOUND
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+  /v1/nominations/{nominationId}/history:
+    get:
+      tags:
+      - Nominaciones
+      summary: Consultar el historial de una nominación
+      description: "Transiciones de estado en orden cronológico, con origen y correlation_id\
+        \ (auditoría)."
+      operationId: history
+      parameters:
+      - $ref: "#/components/parameters/X-Entity-Id"
+      - $ref: "#/components/parameters/X-Correlation-Id"
+      - name: nominationId
+        in: path
+        description: Id de la nominación (UUID)
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Historial cronológico
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NominationHistoryResponse"
+              examples:
+                creacion:
+                  description: creacion
+                  value:
+                    nomination_id: 7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23
+                    items:
+                    - to_status: RECEIVED
+                      source: API
+                      correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                      occurred_at: 2026-10-08T12:00:00Z
+        "400":
+          description: '`MISSING_HEADER` o `INVALID_PARAMETER` (nomination_id no es
+            UUID)'
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                MISSING_HEADER:
+                  description: MISSING_HEADER
+                  value:
+                    type: https://api.prisma.example/problems/missing-header
+                    title: Header obligatorio ausente
+                    status: 400
+                    detail: Falta el header obligatorio X-Entity-Id
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: MISSING_HEADER
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                INVALID_PARAMETER:
+                  description: INVALID_PARAMETER
+                  value:
+                    type: https://api.prisma.example/problems/invalid-parameter
+                    title: Parámetro inválido
+                    status: 400
+                    detail: Un parámetro de la solicitud tiene formato inválido
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: INVALID_PARAMETER
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                    errors:
+                    - field: nomination_id
+                      message: Formato inválido
+        "404":
+          description: "`NOMINATION_NOT_FOUND`: no existe o pertenece a otra entidad"
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                NOMINATION_NOT_FOUND:
+                  description: NOMINATION_NOT_FOUND
+                  value:
+                    type: https://api.prisma.example/problems/nomination-not-found
+                    title: Nominación inexistente
+                    status: 404
+                    detail: No existe la nominación solicitada
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: NOMINATION_NOT_FOUND
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+components:
+  schemas:
+    ProblemDetail:
+      type: object
+      description: Error RFC 9457 (application/problem+json)
+      properties:
+        type:
+          type: string
+          format: uri
+          description: https://api.prisma.example/problems/<code en kebab-case>
+          example: https://api.prisma.example/problems/validation-error
+        title:
+          type: string
+          example: Datos inválidos
+        status:
+          type: integer
+          format: int32
+          example: 400
+        detail:
+          type: string
+          example: La solicitud contiene datos inválidos
+        instance:
+          type: string
+          format: uri
+          description: urn:correlation-id:<correlation_id>
+          example: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+        code:
+          type: string
+          description: Código estable para máquinas
+          enum:
+          - VALIDATION_ERROR
+          - MALFORMED_REQUEST
+          - MISSING_HEADER
+          - INVALID_PARAMETER
+          - BAD_REQUEST
+          - NOMINATION_NOT_FOUND
+          - RESOURCE_NOT_FOUND
+          - METHOD_NOT_ALLOWED
+          - NOT_ACCEPTABLE
+          - IDEMPOTENCY_CONFLICT
+          - CONCURRENT_MODIFICATION
+          - PAYLOAD_TOO_LARGE
+          - UNSUPPORTED_MEDIA_TYPE
+          - REQUEST_ERROR
+          - SERVICE_UNAVAILABLE
+          - INTERNAL_ERROR
+        correlation_id:
+          type: string
+          example: c0ffee00-1234-4abc-9def-000000000001
+        timestamp:
+          type: string
+          format: date-time
+          example: 2026-10-08T12:00:00Z
+        errors:
+          type: array
+          description: Solo cuando el error es atribuible a campos
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                description: Campo en snake_case
+                example: card_id
+              message:
+                type: string
+                description: Nunca incluye el valor recibido
+                example: card_id es obligatorio
+    CreateNominationRequest:
+      description: Solicitud de nominación de una cuenta y una tarjeta
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Clave de idempotencia generada por el canal; única por entidad
+          example: 0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87
+        customer_id:
+          type: string
+          description: Identificador del cliente en la entidad
+          example: CUST-000123
+          maxLength: 36
+          minLength: 0
+        account_id:
+          type: string
+          description: Cuenta a nominar (4 a 34 alfanuméricos). Se devuelve enmascarada
+          example: "0001234567890987654"
+          maxLength: 34
+          minLength: 0
+        card_id:
+          type: string
+          description: "Token o referencia enmascarada de la tarjeta (4 a 64: alfanumé\
+            ricos, '_', '-', '*'). Un valor con forma de PAN (13 a 19 dígitos) se\
+            \ rechaza"
+          example: tok_4f9a2c7b8d1e
+          maxLength: 64
+          minLength: 0
+        alias:
+          type: string
+          description: Alias opcional de la nominación
+          example: CUENTA SUELDO
+          maxLength: 50
+          minLength: 0
+          pattern: "[A-Za-z0-9_ ]+"
+      required:
+      - account_id
+      - card_id
+      - customer_id
+      - request_id
+    NominationResponse:
+      description: Estado público de una nominación
+      properties:
+        nomination_id:
+          type: string
+          format: uuid
+        request_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - RECEIVED
+          - PENDING_ABM
+          - APPROVED
+          - REJECTED
+          - ABM_TIMEOUT
+        customer_id:
+          type: string
+        account_id:
+          type: string
+          description: "Enmascarado: solo los últimos 4 caracteres"
+          example: '****7654'
+        card_id:
+          type: string
+          description: "Enmascarado: solo los últimos 4 caracteres"
+          example: '****8d1e'
+        alias:
+          type: string
+        rejection_reason:
+          type: string
+          description: Motivo normalizado; solo presente en REJECTED
+          enum:
+          - INVALID_ACCOUNT
+          - INVALID_CARD
+          - CARD_NOT_ELIGIBLE
+          - ACCOUNT_BLOCKED
+          - ALREADY_NOMINATED
+          - OTHER
+        correlation_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    NominationHistoryItem:
+      description: Una transición de estado
+      properties:
+        from_status:
+          type: string
+          description: Estado anterior; ausente en la creación
+          enum:
+          - RECEIVED
+          - PENDING_ABM
+          - APPROVED
+          - REJECTED
+          - ABM_TIMEOUT
+        to_status:
+          type: string
+          enum:
+          - RECEIVED
+          - PENDING_ABM
+          - APPROVED
+          - REJECTED
+          - ABM_TIMEOUT
+        source:
+          type: string
+          enum:
+          - API
+          - ABM_ADAPTER
+          - ABM_RESPONSE
+          - SWEEPER
+          - OPERATOR
+        detail:
+          type: string
+        correlation_id:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+    NominationHistoryResponse:
+      properties:
+        nomination_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NominationHistoryItem"
+  parameters:
+    X-Entity-Id:
+      name: X-Entity-Id
+      in: header
+      description: "Entidad financiera que llama. Aísla las nominaciones por entidad\
+        \ y forma parte de la clave de idempotencia. **Transitorio**: en la fase de\
+        \ seguridad sale del JWT."
+      required: true
+      schema:
+        type: string
+        example: ENT01
+        maxLength: 20
+    X-Correlation-Id:
+      name: X-Correlation-Id
+      in: header
+      description: "Opcional. Si falta o no cumple `[A-Za-z0-9._-]{1,64}` se genera\
+        \ uno. Vuelve siempre en la respuesta y viaja a historial, logs y eventos."
+      required: false
+      schema:
+        type: string
+        example: c0ffee00-1234-4abc-9def-000000000001
+        pattern: "[A-Za-z0-9._-]{1,64}"
+  headers:
+    X-Correlation-Id:
+      description: "Correlation id de la operación: el recibido o uno generado"
+      schema:
+        type: string
+        example: c0ffee00-1234-4abc-9def-000000000001

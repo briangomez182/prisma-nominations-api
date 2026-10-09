@@ -5,6 +5,15 @@ spring:
     virtual:
       enabled: true
 
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: false
+  mvc:
+    problemdetails:
+      enabled: true
+
   datasource:
     url: jdbc:postgresql://localhost:5432/nominations
     username: nominations
@@ -40,3 +49,7 @@ management:
     health:
       probes:
         enabled: true
+
+logging:
+  pattern:
+    level: "%5p [%X{correlationId:-}]"   # correlation id (MDC, CorrelationIdFilter) en cada línea de log

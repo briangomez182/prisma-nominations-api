@@ -144,4 +144,13 @@ class NominationTest {
                 .extracting(e -> ((InvalidNominationDataException) e).field())
                 .isEqualTo("customer_id");
     }
+
+    @Test
+    void entityIdMustFitTheDatabaseColumn() {
+        assertThatThrownBy(() -> Nomination.receive("E".repeat(21), UUID.randomUUID(), "123456",
+                new AccountId("987654"), new CardToken("tok_4f9a2c"), null, "corr-1", NOW))
+                .isInstanceOf(InvalidNominationDataException.class)
+                .extracting(e -> ((InvalidNominationDataException) e).field())
+                .isEqualTo("entity_id");
+    }
 }
