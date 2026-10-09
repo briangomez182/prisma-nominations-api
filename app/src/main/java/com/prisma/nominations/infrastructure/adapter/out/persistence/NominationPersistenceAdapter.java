@@ -5,12 +5,15 @@ import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.NominationStatus;
 import com.prisma.nominations.domain.StatusChange;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -61,6 +64,12 @@ class NominationPersistenceAdapter implements NominationRepository {
     @Transactional(readOnly = true)
     public Optional<Nomination> findByEntityIdAndRequestId(String entityId, UUID requestId) {
         return nominations.findByEntityIdAndRequestId(entityId, requestId).map(NominationPersistenceAdapter::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findIdsByStatusUpdatedBefore(NominationStatus status, Instant before, int limit) {
+        return nominations.findIdsByStatusUpdatedBefore(status, before, Limit.of(limit));
     }
 
     @Override

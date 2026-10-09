@@ -35,7 +35,10 @@ import java.util.regex.Pattern;
  * <p>
  * <b>Versionado (tolerant reader):</b> campos desconocidos se ignoran; {@code schema_version} mayor se procesa con
  * WARN; otro {@code event_type} se ignora (ACK); JSON inválido o sin nomination_id → poison pill → DLT.
- * Los errores de ABM los clasifica el error handler de {@link AbmAdapterConsumerConfig}.
+ * <p>
+ * <b>Errores:</b> el mismo método consume el tópico principal y sus tópicos de retry. Qué se reintenta (sin
+ * bloquear la partición), qué va directo al DLT y cómo se cierra la nominación lo define
+ * {@link AbmAdapterConsumerConfig}; el DLT lo procesa {@link NominationRequestedDltHandler}.
  */
 @Component
 @ConditionalOnProperty(name = "nominations.abm.adapter.enabled", havingValue = "true")
@@ -68,15 +71,21 @@ class NominationRequestedListener {
             topics = KafkaTopics.NOMINATION_REQUESTED,
             containerFactory = AbmAdapterConsumerConfig.ABM_ADAPTER_CONTAINER_FACTORY)
     void onRequested(ConsumerRecord<String, String> record) {
-        RequestedMessage event = parse(record.value());
-        String correlationId = firstNonBlank(header(record, KafkaTopics.HEADER_CORRELATION_ID), event.correlationId());
-        if (correlationId != null && SAFE_CORRELATION_ID.matcher(correlationId).matches()) {
-            MDC.put(ApiHeaders.CORRELATION_ID_MDC_KEY, correlationId);
-        }
+        RequestedMessage event = parse(objectMapper, record.value());
+        putCorrelationId(record, event);
         try {
             handle(record, event);
         } finally {
             MDC.remove(ApiHeaders.CORRELATION_ID_MDC_KEY);
+        }
+    }
+
+    /** Correlation id del header (o del payload, si {@code event} no es null) al MDC, solo si tiene formato seguro. */
+    static void putCorrelationId(ConsumerRecord<String, String> record, RequestedMessage event) {
+        String correlationId = firstNonBlank(header(record, KafkaTopics.HEADER_CORRELATION_ID),
+                event == null ? null : event.correlationId());
+        if (correlationId != null && SAFE_CORRELATION_ID.matcher(correlationId).matches()) {
+            MDC.put(ApiHeaders.CORRELATION_ID_MDC_KEY, correlationId);
         }
     }
 
@@ -94,6 +103,9 @@ class NominationRequestedListener {
                     + "nomination_id={}", version, SUPPORTED_SCHEMA_VERSION, nominationId);
         }
 
+        if (!KafkaTopics.NOMINATION_REQUESTED.equals(record.topic())) {
+            log.info("Reintento de envío a ABM: nomination_id={} tópico={}", nominationId, record.topic());
+        }
         SubmitOutcome outcome = submitToAbm.submit(nominationId);
         switch (outcome) {
             case SUBMITTED -> log.info("Nominación enviada a ABM: nomination_id={}", nominationId);
@@ -102,7 +114,7 @@ class NominationRequestedListener {
         }
     }
 
-    private RequestedMessage parse(String payload) {
+    static RequestedMessage parse(ObjectMapper objectMapper, String payload) {
         if (payload == null || payload.isBlank()) {
             throw new InvalidEventException("nomination.requested con payload vacío");
         }
@@ -119,7 +131,7 @@ class NominationRequestedListener {
     }
 
     /** El payload manda; la key (que el relay pone = nomination_id) es el respaldo. */
-    private static UUID nominationId(ConsumerRecord<String, String> record, RequestedMessage event) {
+    static UUID nominationId(ConsumerRecord<String, String> record, RequestedMessage event) {
         if (event.nominationId() != null) {
             return event.nominationId();
         }
@@ -146,7 +158,7 @@ class NominationRequestedListener {
         return event.schemaVersion() == null ? 1 : event.schemaVersion();
     }
 
-    private static String header(ConsumerRecord<String, String> record, String name) {
+    static String header(ConsumerRecord<String, String> record, String name) {
         Header header = record.headers().lastHeader(name);
         if (header == null || header.value() == null) {
             return null;

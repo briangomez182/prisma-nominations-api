@@ -209,12 +209,12 @@ class AbmFlowIntegrationTest {
     }
 
     @Nested
-    @DisplayName("E6 (anticipo) - ABM no responde (SILENT): queda en PENDING_ABM")
+    @DisplayName("E6 - ABM no responde (SILENT): queda en PENDING_ABM mientras no venza el SLA")
     class E6SilentAbm {
 
         /**
-         * Comportamiento actual, sin SLA: la nominación espera indefinidamente en PENDING_ABM y no publica resultado.
-         * La fase 6 agrega el sweeper que la pasa a ABM_TIMEOUT pasado el SLA de ABM.
+         * Dentro del SLA de ABM (15 min por defecto) la nominación espera en PENDING_ABM y no publica resultado. El
+         * paso a ABM_TIMEOUT por el sweeper y el reproceso los cubre {@code AbmResilienceIntegrationTest}.
          */
         @Test
         void staysPendingWithoutResult() throws Exception {

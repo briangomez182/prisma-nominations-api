@@ -267,6 +267,13 @@ class NominationApiIntegrationTest {
             assertThat(spec.at("/components/schemas/ProblemDetail/properties").has("correlation_id")).isTrue();
             assertThat(spec.at("/components/parameters").has(ApiHeaders.ENTITY_ID)).isTrue();
             assertThat(spec.at("/components/parameters").has(ApiHeaders.CORRELATION_ID)).isTrue();
+
+            // Operación (/internal): X-Correlation-Id común en request y response, sin X-Entity-Id.
+            JsonNode reprocess = spec.at("/paths/~1internal~1v1~1nominations~1{nominationId}~1reprocess/post");
+            assertThat(reprocess.path("parameters").findValuesAsText("$ref"))
+                    .containsExactly("#/components/parameters/" + ApiHeaders.CORRELATION_ID);
+            assertThat(reprocess.at("/responses/202/headers").has(ApiHeaders.CORRELATION_ID)).isTrue();
+            assertThat(reprocess.at("/responses/409/headers").has(ApiHeaders.CORRELATION_ID)).isTrue();
         }
 
         /**

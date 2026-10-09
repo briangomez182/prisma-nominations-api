@@ -30,13 +30,15 @@ import java.util.List;
  * Documentación OpenAPI (springdoc): /v3/api-docs, /v3/api-docs.yaml y Swagger UI en /swagger-ui.html.
  * <p>
  * Los headers comunes (X-Entity-Id, X-Correlation-Id) y el schema de error (ProblemDetail, RFC 9457) se
- * definen una sola vez en components y se agregan a cada operación de /v1 desde acá, no en cada endpoint.
+ * definen una sola vez en components y se agregan desde acá, no en cada endpoint: X-Entity-Id + X-Correlation-Id
+ * a la API pública (/v1) y solo X-Correlation-Id a los endpoints de operación (/internal, sin entidad).
  */
 @Configuration(proxyBeanMethods = false)
 class OpenApiConfig {
 
     static final String TAG_NOMINATIONS = "Nominaciones";
     private static final String API_PATH_PREFIX = "/v1/";
+    private static final String INTERNAL_PATH_PREFIX = "/internal/";
     private static final String PROBLEM_SCHEMA = "ProblemDetail";
 
     /**
@@ -85,25 +87,31 @@ class OpenApiConfig {
                         .addSchemas(PROBLEM_SCHEMA, problemSchema()));
     }
 
-    /** Agrega los headers comunes a todas las operaciones de la API (no a actuator ni a la propia doc). */
+    /**
+     * Agrega los headers comunes a las operaciones de la API pública (/v1: X-Entity-Id + X-Correlation-Id) y de
+     * operación (/internal: solo X-Correlation-Id). No toca actuator ni la propia doc.
+     */
     @Bean
     OpenApiCustomizer commonHeadersCustomizer() {
         return openApi -> openApi.getPaths().forEach((path, item) -> {
-            if (!path.startsWith(API_PATH_PREFIX)) {
-                return;
+            if (path.startsWith(API_PATH_PREFIX)) {
+                item.readOperations().forEach(operation -> addCommonHeaders(operation, true));
+            } else if (path.startsWith(INTERNAL_PATH_PREFIX)) {
+                item.readOperations().forEach(operation -> addCommonHeaders(operation, false));
             }
-            item.readOperations().forEach(OpenApiConfig::addCommonHeaders);
         });
     }
 
-    private static void addCommonHeaders(Operation operation) {
+    private static void addCommonHeaders(Operation operation, boolean withEntity) {
         // X-Entity-Id ya está como @RequestHeader: se reemplaza por la definición común (con descripción).
         List<Parameter> parameters = new ArrayList<>(operation.getParameters() != null
                 ? operation.getParameters() : List.of());
         parameters.removeIf(p -> "header".equals(p.getIn())
                 && (ApiHeaders.ENTITY_ID.equalsIgnoreCase(p.getName()) || ApiHeaders.CORRELATION_ID.equalsIgnoreCase(p.getName())));
         parameters.add(0, new Parameter().$ref("#/components/parameters/" + ApiHeaders.CORRELATION_ID));
-        parameters.add(0, new Parameter().$ref("#/components/parameters/" + ApiHeaders.ENTITY_ID));
+        if (withEntity) {
+            parameters.add(0, new Parameter().$ref("#/components/parameters/" + ApiHeaders.ENTITY_ID));
+        }
         operation.setParameters(parameters);
 
         if (operation.getResponses() != null) {

@@ -1,8 +1,10 @@
 package com.prisma.nominations.application.port.out;
 
 import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.NominationStatus;
 import com.prisma.nominations.domain.StatusChange;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +21,9 @@ public interface NominationRepository {
     Optional<Nomination> findById(UUID id);
 
     Optional<Nomination> findByEntityIdAndRequestId(String entityId, UUID requestId);
+
+    /** Ids de nominaciones en {@code status} sin cambios desde antes de {@code before}, las más viejas primero. */
+    List<UUID> findIdsByStatusUpdatedBefore(NominationStatus status, Instant before, int limit);
 
     /** Historial completo en orden cronológico. */
     List<StatusChange> findHistory(UUID nominationId);

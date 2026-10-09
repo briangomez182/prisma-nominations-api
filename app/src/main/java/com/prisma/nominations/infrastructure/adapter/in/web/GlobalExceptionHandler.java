@@ -6,6 +6,7 @@ import com.prisma.nominations.application.exception.DuplicateNominationException
 import com.prisma.nominations.application.exception.IdempotencyConflictException;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.domain.InvalidNominationDataException;
+import com.prisma.nominations.domain.InvalidStatusTransitionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -77,6 +78,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 "El request_id ya fue utilizado con datos distintos"),
         CONCURRENT_MODIFICATION(HttpStatus.CONFLICT, "Modificación concurrente",
                 "El recurso fue modificado por otra operación; reintentar"),
+        INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "Estado no válido para la operación",
+                "La nominación no está en un estado que admita esta operación"),
         PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "Solicitud demasiado grande", "La solicitud excede el tamaño permitido"),
         UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type no soportado",
                 "El Content-Type de la solicitud no está soportado"),
@@ -141,6 +144,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler({IdempotencyConflictException.class, DuplicateNominationException.class})
     ResponseEntity<Object> handleIdempotencyConflict(RuntimeException ex, WebRequest request) {
         return respond(ex, problem(ProblemCode.IDEMPOTENCY_CONFLICT, null), request);
+    }
+
+    /** P.ej. reprocesar una nominación que no está en ABM_TIMEOUT. El detail es fijo: no cita estados ni ids. */
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    ResponseEntity<Object> handleInvalidTransition(InvalidStatusTransitionException ex, WebRequest request) {
+        return respond(ex, problem(ProblemCode.INVALID_STATE_TRANSITION, null), request);
     }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)

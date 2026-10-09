@@ -3,10 +3,13 @@ package com.prisma.nominations.application.service;
 import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.NominationStatus;
 import com.prisma.nominations.domain.StatusChange;
 import org.springframework.dao.OptimisticLockingFailureException;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +112,16 @@ class InMemoryNominationRepository implements NominationRepository {
         return nominations.values().stream()
                 .filter(n -> n.entityId().equals(entityId) && n.requestId().equals(requestId))
                 .findFirst();
+    }
+
+    @Override
+    public List<UUID> findIdsByStatusUpdatedBefore(NominationStatus status, Instant before, int limit) {
+        return nominations.values().stream()
+                .filter(n -> n.status() == status && n.updatedAt().isBefore(before))
+                .sorted(Comparator.comparing(Nomination::updatedAt))
+                .limit(limit)
+                .map(Nomination::id)
+                .toList();
     }
 
     @Override

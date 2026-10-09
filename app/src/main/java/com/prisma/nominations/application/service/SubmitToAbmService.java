@@ -58,7 +58,7 @@ class SubmitToAbmService implements SubmitToAbmUseCase {
      * @return SUBMITTED si ABM aceptó el pedido (aunque ABM ya hubiera respondido y no quede en PENDING_ABM);
      * SKIPPED si la nominación ya no estaba en RECEIVED y no se llamó a ABM.
      * @throws AbmUnavailableException falla técnica: la política de reintentos, DLT y ABM_TIMEOUT es del
-     *                                 adapter que invoca este caso de uso (fase 6)
+     *                                 ABM Adapter que invoca este caso de uso (tópicos de retry)
      * @throws AbmContractException    ABM rechazó el pedido por contrato: no reintentable
      */
     @Override

@@ -214,29 +214,20 @@ X-Entity-Id: {{entity}}
 GET {{baseUrl}}/v1/nominations/{{e7Id}}/history
 X-Entity-Id: {{entity}}
 
-### SILENT — ABM nunca responde
-# Queda en PENDING_ABM. La fase 6 agrega el sweeper que la pasa a ABM_TIMEOUT pasado el SLA.
-POST {{baseUrl}}/v1/nominations
-Content-Type: application/json
-X-Entity-Id: {{entity}}
-X-Correlation-Id: demo-silent-0001
+### ─────────────────────────────────────────────────────────────────────────────
+# E6 — Resiliencia (ver README, sección "Resiliencia (E6)", y docs/operations.md).
+# Tiempos por defecto: capa 1 = 3 intentos con read-timeout 2s; capa 2 = tópicos de retry 10s, 1m y 5m;
+# SLA de respuesta de ABM = 15m (sweeper cada 30s). Para verlo rápido, arrancar la app con, p.ej.:
+#   mvn spring-boot:run -Dspring-boot.run.arguments="--nominations.abm.adapter.retry-delays=2s,2s --nominations.abm.sweeper.response-sla=30s"
 
-{
-  "request_id": "{{$uuid}}",
-  "customer_id": "CUST-000123",
-  "account_id": "0001234567890987654",
-  "card_id": "tok_demo_SILENT_01",
-  "alias": "CUENTA SUELDO"
-}
+### Estado del circuit breaker de ABM (components.circuitBreakers.details.abm.details.state)
+GET {{baseUrl}}/actuator/health
 
-> {% client.global.set("silentId", response.body.nomination_id); %}
-
-### SILENT — estado (sigue en PENDING_ABM)
-GET {{baseUrl}}/v1/nominations/{{silentId}}
-X-Entity-Id: {{entity}}
-
-### FAIL — ABM no disponible (503)
-# Queda en RECEIVED: el adapter reintenta (max-attempts) y luego manda el mensaje a nomination.requested.v1-dlt (fase 6: ABM_TIMEOUT).
+### E6-FAIL — ABM no disponible (503 siempre)
+# RECEIVED mientras reintenta: 3 intentos por pasada × (principal, -retry-0, -retry-1, -retry-2), ~6 min con los
+# defaults. Agotado → nomination.requested.v1-dlt y ABM_TIMEOUT ("Reintentos agotados: ABM no disponible"), sin
+# nomination.result. Un solo FAIL ya hace hasta 12 llamadas (4 pasadas × 3): pasada la 10ª con ≥ 50 % de fallas el
+# circuit breaker se abre (ver /actuator/health) y las pasadas siguientes fallan sin llamar a ABM.
 POST {{baseUrl}}/v1/nominations
 Content-Type: application/json
 X-Entity-Id: {{entity}}
@@ -252,6 +243,68 @@ X-Correlation-Id: demo-fail-0001
 
 > {% client.global.set("failId", response.body.nomination_id); %}
 
-### FAIL — estado (sigue en RECEIVED)
+### E6-FAIL — estado (RECEIVED mientras reintenta; luego ABM_TIMEOUT)
 GET {{baseUrl}}/v1/nominations/{{failId}}
+X-Entity-Id: {{entity}}
+
+### E6-FAIL — historial (RECEIVED → ABM_TIMEOUT, source ABM_ADAPTER)
+GET {{baseUrl}}/v1/nominations/{{failId}}/history
+X-Entity-Id: {{entity}}
+
+### E6-FAIL — reprocesar cuando esté en ABM_TIMEOUT (vuelve a fallar mientras ABM siga caído)
+POST {{baseUrl}}/internal/v1/nominations/{{failId}}/reprocess
+X-Correlation-Id: demo-fail-reprocess-0001
+
+### E6-SLOW — ABM tarda 10s en contestar el HTTP (> read-timeout 2s)
+# Cada intento corta por timeout → reintentos → ABM_TIMEOUT. Pero ABM sí recibió el pedido y aprueba: la respuesta
+# tardía lleva la nominación de ABM_TIMEOUT a APPROVED y se publica UN solo nomination.result.
+# (Con los defaults la respuesta llega a los ~10s, antes de agotar la capa 2: se ve RECEIVED → APPROVED. Para ver
+# ABM_TIMEOUT → APPROVED, acortar retry-delays como se indica arriba y subir nominations.abm-mock.slow-http-delay.)
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-slow-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_SLOW_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("slowId", response.body.nomination_id); %}
+
+### E6-SLOW — historial
+GET {{baseUrl}}/v1/nominations/{{slowId}}/history
+X-Entity-Id: {{entity}}
+
+### E6-SILENT — ABM acepta (202) y nunca responde
+# PENDING_ABM hasta que vence el SLA (15m); el sweeper la pasa a ABM_TIMEOUT (source SWEEPER).
+POST {{baseUrl}}/v1/nominations
+Content-Type: application/json
+X-Entity-Id: {{entity}}
+X-Correlation-Id: demo-silent-0001
+
+{
+  "request_id": "{{$uuid}}",
+  "customer_id": "CUST-000123",
+  "account_id": "0001234567890987654",
+  "card_id": "tok_demo_SILENT_01",
+  "alias": "CUENTA SUELDO"
+}
+
+> {% client.global.set("silentId", response.body.nomination_id); %}
+
+### E6-SILENT — estado (PENDING_ABM; ABM_TIMEOUT pasado el SLA)
+GET {{baseUrl}}/v1/nominations/{{silentId}}
+X-Entity-Id: {{entity}}
+
+### E6-SILENT — reproceso por un operador (solo desde ABM_TIMEOUT: 202 y RECEIVED; si no, 409 INVALID_STATE_TRANSITION)
+# Sin X-Entity-Id: endpoint interno. ABM es idempotente: devuelve el mismo abm_operation_id y vuelve a PENDING_ABM.
+POST {{baseUrl}}/internal/v1/nominations/{{silentId}}/reprocess
+X-Correlation-Id: demo-silent-reprocess-0001
+
+### E6-SILENT — historial (… → ABM_TIMEOUT [SWEEPER] → RECEIVED [OPERATOR] → PENDING_ABM)
+GET {{baseUrl}}/v1/nominations/{{silentId}}/history
 X-Entity-Id: {{entity}}

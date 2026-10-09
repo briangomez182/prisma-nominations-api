@@ -22,6 +22,7 @@
         <!-- 1.21.3 (la que trae Boot 3.5.6) usa una API de Docker que Docker Engine 29 rechaza -->
         <testcontainers.version>1.21.4</testcontainers.version>
         <springdoc.version>2.8.17</springdoc.version>
+        <resilience4j.version>2.3.0</resilience4j.version>
         <!-- Permite compilar en un directorio aislado: mvn -Dbuild.dir=/otro/dir ... -->
         <build.dir>${project.basedir}/target</build.dir>
     </properties>
@@ -66,6 +67,17 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- Resiliencia hacia ABM: retry + circuit breaker -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>${resilience4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
 
         <!-- Operación -->

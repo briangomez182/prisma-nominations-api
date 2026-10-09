@@ -121,6 +121,44 @@ final class OpenApiExamples {
               "timestamp": "2026-10-08T12:00:00Z"
             }""";
 
+    static final String NOMINATION_REPROCESSED = """
+            {
+              "nomination_id": "7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23",
+              "request_id": "0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87",
+              "status": "RECEIVED",
+              "customer_id": "CUST-000123",
+              "account_id": "****7654",
+              "card_id": "****8d1e",
+              "alias": "CUENTA SUELDO",
+              "correlation_id": "c0ffee00-1234-4abc-9def-000000000001",
+              "created_at": "2026-10-08T12:00:00Z",
+              "updated_at": "2026-10-08T12:40:00Z"
+            }""";
+
+    static final String INVALID_STATE_TRANSITION = """
+            {
+              "type": "https://api.prisma.example/problems/invalid-state-transition",
+              "title": "Estado no válido para la operación",
+              "status": 409,
+              "detail": "La nominación no está en un estado que admita esta operación",
+              "instance": "urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001",
+              "code": "INVALID_STATE_TRANSITION",
+              "correlation_id": "c0ffee00-1234-4abc-9def-000000000001",
+              "timestamp": "2026-10-08T12:00:00Z"
+            }""";
+
+    static final String CONCURRENT_MODIFICATION = """
+            {
+              "type": "https://api.prisma.example/problems/concurrent-modification",
+              "title": "Modificación concurrente",
+              "status": 409,
+              "detail": "El recurso fue modificado por otra operación; reintentar",
+              "instance": "urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001",
+              "code": "CONCURRENT_MODIFICATION",
+              "correlation_id": "c0ffee00-1234-4abc-9def-000000000001",
+              "timestamp": "2026-10-08T12:00:00Z"
+            }""";
+
     private OpenApiExamples() {
     }
 }

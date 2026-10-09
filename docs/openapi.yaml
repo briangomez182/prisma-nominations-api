@@ -18,6 +18,8 @@ servers:
 tags:
 - name: Nominaciones
   description: Alta asincrónica y consulta de nominaciones de cuentas y tarjetas
+- name: Operación
+  description: "Recuperación controlada por un operador (uso interno, no para entidades)"
 paths:
   /v1/nominations:
     post:
@@ -158,6 +160,135 @@ paths:
                     detail: El request_id ya fue utilizado con datos distintos
                     instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
                     code: IDEMPOTENCY_CONFLICT
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+  /internal/v1/nominations/{nominationId}/reprocess:
+    post:
+      tags:
+      - Operación
+      summary: Reprocesar una nominación en ABM_TIMEOUT (operador)
+      description: |-
+        Recuperación controlada de una nominación que quedó en `ABM_TIMEOUT` (reintentos agotados o sin respuesta de ABM dentro del SLA): pasa a `RECEIVED` y encola un nuevo pedido a ABM (outbox), en una única transacción. Responde **202**: el reenvío a ABM es asincrónico.
+
+        Solo desde `ABM_TIMEOUT`; desde cualquier otro estado responde **409** sin cambios. ABM es idempotente por `nomination_id`: si el pedido original sí había llegado, no se crea otro alta.
+
+        **Uso interno**: requiere rol de operador (fase de seguridad); no usa `X-Entity-Id`.
+      operationId: reprocess
+      parameters:
+      - $ref: "#/components/parameters/X-Correlation-Id"
+      - name: nominationId
+        in: path
+        description: Id de la nominación (UUID)
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "202":
+          description: "Reproceso aceptado: la nominación vuelve a `RECEIVED`"
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+            Location:
+              description: URI pública de la nominación
+              style: simple
+              schema:
+                type: string
+                example: /v1/nominations/7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NominationResponse"
+              examples:
+                reprocesada:
+                  description: reprocesada
+                  value:
+                    nomination_id: 7d1e6c2a-4b8f-4a51-9c3e-2f6a8b0d1e23
+                    request_id: 0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87
+                    status: RECEIVED
+                    customer_id: CUST-000123
+                    account_id: '****7654'
+                    card_id: '****8d1e'
+                    alias: CUENTA SUELDO
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    created_at: 2026-10-08T12:00:00Z
+                    updated_at: 2026-10-08T12:40:00Z
+        "400":
+          description: '`INVALID_PARAMETER` (nomination_id no es UUID)'
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                INVALID_PARAMETER:
+                  description: INVALID_PARAMETER
+                  value:
+                    type: https://api.prisma.example/problems/invalid-parameter
+                    title: Parámetro inválido
+                    status: 400
+                    detail: Un parámetro de la solicitud tiene formato inválido
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: INVALID_PARAMETER
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                    errors:
+                    - field: nomination_id
+                      message: Formato inválido
+        "404":
+          description: "`NOMINATION_NOT_FOUND`: no existe"
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                NOMINATION_NOT_FOUND:
+                  description: NOMINATION_NOT_FOUND
+                  value:
+                    type: https://api.prisma.example/problems/nomination-not-found
+                    title: Nominación inexistente
+                    status: 404
+                    detail: No existe la nominación solicitada
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: NOMINATION_NOT_FOUND
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+        "409":
+          description: '`INVALID_STATE_TRANSITION` (no está en `ABM_TIMEOUT`) o `CONCURRENT_MODIFICATION`
+            (cambió durante el reproceso; reintentar)'
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/X-Correlation-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              examples:
+                INVALID_STATE_TRANSITION:
+                  description: INVALID_STATE_TRANSITION
+                  value:
+                    type: https://api.prisma.example/problems/invalid-state-transition
+                    title: Estado no válido para la operación
+                    status: 409
+                    detail: La nominación no está en un estado que admita esta operación
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: INVALID_STATE_TRANSITION
+                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                    timestamp: 2026-10-08T12:00:00Z
+                CONCURRENT_MODIFICATION:
+                  description: CONCURRENT_MODIFICATION
+                  value:
+                    type: https://api.prisma.example/problems/concurrent-modification
+                    title: Modificación concurrente
+                    status: 409
+                    detail: El recurso fue modificado por otra operación; reintentar
+                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                    code: CONCURRENT_MODIFICATION
                     correlation_id: c0ffee00-1234-4abc-9def-000000000001
                     timestamp: 2026-10-08T12:00:00Z
   /v1/nominations/{nominationId}:
@@ -395,6 +526,7 @@ components:
           - NOT_ACCEPTABLE
           - IDEMPOTENCY_CONFLICT
           - CONCURRENT_MODIFICATION
+          - INVALID_STATE_TRANSITION
           - PAYLOAD_TOO_LARGE
           - UNSUPPORTED_MEDIA_TYPE
           - REQUEST_ERROR

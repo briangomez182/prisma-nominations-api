@@ -93,12 +93,13 @@ Contrato de eventos (payloads, headers, versionado, DLT y reproceso): [`docs/eve
 
 | Tópico | Key | Productor | Consumidor | DLT |
 |--------|-----|-----------|------------|-----|
-| `nomination.requested.v1` | `nomination_id` | API (outbox → relay) | ABM Adapter `abm-adapter` | `nomination.requested.v1-dlt` |
+| `nomination.requested.v1` | `nomination_id` | API (outbox → relay) | ABM Adapter `abm-adapter` | `nomination.requested.v1-dlt` (grupo `abm-adapter-dlt`) |
+| `nomination.requested.v1-retry-0` / `-1` / `-2` | `nomination_id` | ABM Adapter (reintento no bloqueante) | ABM Adapter `abm-adapter-retry-0` / `-1` / `-2` | — (agotados → `nomination.requested.v1-dlt`) |
 | `abm.responses.v1` | `nomination_id` | ABM (en la demo, el simulador) | ABM Response Consumer `abm-response-processor` | `abm.responses.v1-dlt` |
 | `nomination.result.v1` | `nomination_id` | API (outbox → relay) | Consumidor de ejemplo `notifications-demo` (+ canales, BI) | `nomination.result.v1-dlt` |
 
-Headers de todo mensaje: `event_id`, `event_type`, `schema_version`, `correlation_id`. Los tópicos y sus DLT (mismas
-particiones) los crea la app al arrancar.
+Headers de todo mensaje: `event_id`, `event_type`, `schema_version`, `correlation_id`. Los tópicos, sus DLT y los
+tópicos de retry del ABM Adapter (mismas particiones) los crea la app al arrancar.
 
 **Relay (D6).** Un ciclo programado (`fixed-delay`) toma un lote de `outbox_events` pendientes con
 `FOR UPDATE SKIP LOCKED`, así varias instancias corren en paralelo sin tomar la misma fila (E10).
@@ -129,9 +130,13 @@ Consumidor de ejemplo (`notifications-demo`): commit de offset por registro desp
 | `nominations.demo-consumer.enabled` / `.group-id` | `true` / `notifications-demo` | Consumidor de ejemplo de `nomination.result.v1` |
 | `nominations.demo-consumer.max-attempts` / `.backoff` | `3` / `1s` | Reintentos ante error transitorio antes del DLT |
 | `nominations.abm.base-url` | `http://localhost:${local.server.port}/abm-mock` | URL de ABM (se resuelve en cada llamada; en la demo, el simulador de la misma app) |
-| `nominations.abm.connect-timeout` / `.read-timeout` | `2s` / `5s` | Timeouts del cliente HTTP de ABM |
+| `nominations.abm.connect-timeout` / `.read-timeout` | `2s` / `2s` | Timeouts del cliente HTTP de ABM (read-timeout < slow-call del CB, 3s) |
 | `nominations.abm.adapter.enabled` / `.group-id` | `true` / `abm-adapter` | ABM Adapter: consumer de `nomination.requested.v1` que envía a ABM |
-| `nominations.abm.adapter.max-attempts` / `.backoff` | `3` / `1s` | Intentos ante falla técnica de ABM antes del DLT (fase 6: Resilience4j) |
+| `nominations.abm.adapter.retry-delays` | `10s,1m,5m` | Capa 2: espera de cada tópico de retry (`-retry-0`, `-1`, `-2`); agotados → DLT + `ABM_TIMEOUT` |
+| `nominations.abm.sweeper.enabled` / `.fixed-delay` | `true` / `30s` | Ciclo del sweeper del SLA de ABM |
+| `nominations.abm.sweeper.response-sla` / `.batch-size` | `15m` / `100` | `PENDING_ABM` sin respuesta más allá del SLA → `ABM_TIMEOUT` (source `SWEEPER`); tamaño de lote |
+| `resilience4j.retry.instances.abm.*` | 3 intentos, 200ms ×2 + jitter 0,5 | Capa 1: retry en proceso, solo sobre `AbmUnavailableException` |
+| `resilience4j.circuitbreaker.instances.abm.*` | ventana 20, mín. 10, 50% fallas u 80% lentas (>3s), 30s abierto, 3 en HALF_OPEN | Capa 1: circuit breaker; estado en `/actuator/health` |
 | `nominations.abm.response-consumer.enabled` / `.group-id` | `true` / `abm-response-processor` | Consumer de `abm.responses.v1` |
 | `nominations.abm.response-consumer.max-attempts` / `.backoff` | `3` / `1s` | Reintentos ante error transitorio antes del DLT |
 | `nominations.abm-mock.enabled` | `true` (en `application.yml`) | Simulador de ABM; en producción `false` |
@@ -165,8 +170,9 @@ nomination.requested.v1 ─▶ ABM Adapter ──HTTP POST /v1/nominations──
   modifica, WARN). El índice único del outbox garantiza **un solo** `nomination.result` por nominación.
 - **Rechazo funcional vs falla técnica (D10):** un `REJECTED` de ABM es una respuesta válida: estado `REJECTED`,
   motivo normalizado (`ABM-030` → `CARD_NOT_ELIGIBLE`) y el código original solo en la base para auditoría; no se
-  reintenta. Una falla técnica (timeout, conexión, 5xx, 408, 429) se reintenta con backoff y, agotada, va a
-  `nomination.requested.v1-dlt` (fase 6: circuit breaker y `ABM_TIMEOUT`). Un 4xx de contrato va directo al DLT.
+  reintenta. Una falla técnica (timeout, conexión, 5xx, 408, 429, circuit breaker abierto) se reintenta en dos
+  capas y, agotada, va a `nomination.requested.v1-dlt` y la nominación pasa a `ABM_TIMEOUT`. Un 4xx de contrato
+  va directo al DLT. Detalle en [Resiliencia (E6)](#resiliencia-e6).
 - **Simulador:** el escenario se elige por el `card_id` (`tok_demo_ok_01` aprueba, `REJECT[_010|_020|_030|_060]`
   rechaza, `DUP` responde dos veces, `SILENT` no responde, `FAIL` da 503, `SLOW` excede el read-timeout). Detalle
   en [`docs/abm-mock.md`](docs/abm-mock.md); contrato de `abm.responses.v1` en [`docs/events.md`](docs/events.md);
@@ -175,6 +181,88 @@ nomination.requested.v1 ─▶ ABM Adapter ──HTTP POST /v1/nominations──
 Tests: `AbmFlowIntegrationTest` (E4, E5, E7, SILENT, sin doble envío y trazabilidad, todo encendido con servidor
 HTTP real), `AbmMockIntegrationTest`, `NominationRequestedListenerIntegrationTest`,
 `AbmResponseListenerIntegrationTest`. Los contextos de test con MockMvc (sin servidor HTTP) apagan el ABM Adapter.
+
+## Resiliencia (E6)
+
+ABM puede estar caído, lento o no responder nunca. La recuperación está en **dos capas** más dos mecanismos de cierre:
+
+```
+capa 1 (en proceso, ResilientAbmClient)
+  nomination.requested ─▶ Retry "abm" (3 intentos) ─▶ CircuitBreaker "abm" ─▶ HTTP (read-timeout 2s) ─▶ ABM
+                              │
+                              │ AbmUnavailableException (capa 1 agotada o CB abierto)
+                              ▼
+capa 2 (Kafka, no bloqueante, AbmAdapterConsumerConfig)
+  -retry-0 (10s) ─▶ -retry-1 (1m) ─▶ -retry-2 (5m) ─▶ -dlt ─▶ ABM_TIMEOUT (source ABM_ADAPTER)
+
+sweeper
+  PENDING_ABM sin respuesta > 15m ─▶ ABM_TIMEOUT (source SWEEPER)
+
+desde ABM_TIMEOUT
+  respuesta tardía de ABM ─────────────────────────▶ APPROVED/REJECTED + un único nomination.result
+  POST /internal/v1/nominations/{id}/reprocess ────▶ RECEIVED + nuevo nomination.requested
+```
+
+| Capa | Qué | Dónde | Tiempos (default) |
+|------|-----|-------|-------------------|
+| 1 — en proceso | Timeout de lectura/conexión | `AbmHttpClient` | `read-timeout` 2s, `connect-timeout` 2s |
+| 1 — en proceso | Retry corto, solo `AbmUnavailableException` | `ResilientAbmClient` (`resilience4j.retry.instances.abm`) | 3 intentos, espera 200ms → 400ms (exponencial, ±50% jitter) |
+| 1 — en proceso | Circuit breaker alrededor de cada intento HTTP, dentro del Retry: `Retry(CircuitBreaker(http))` | `ResilientAbmClient` (`resilience4j.circuitbreaker.instances.abm`) | Abre con 50% de fallas u 80% de llamadas lentas (>3s) sobre las últimas 20 (mín. 10); 30s abierto; 3 llamadas de prueba en HALF_OPEN |
+| 2 — Kafka | Reintento no bloqueante por tópicos de retry | `AbmAdapterConsumerConfig` (`nominations.abm.adapter.retry-delays`) | `-retry-0` 10s, `-retry-1` 1m, `-retry-2` 5m; luego DLT |
+| Cierre | DLT → `ABM_TIMEOUT` (sin `nomination.result`) | `NominationRequestedDltHandler` → `MarkAbmFailureService` | Al agotar la capa 2 (~6 min) o directo si es contrato |
+| Cierre | Sweeper del SLA de respuesta | `StaleNominationSweeper` → `SweepStaleNominationsService` | `PENDING_ABM` > `response-sla` (15m), ciclo cada 30s |
+
+**Qué se reintenta y qué no** (D10). La clasificación la hace `AbmHttpClient`; el Retry y la capa 2 solo miran la excepción:
+
+| Situación | Excepción | ¿Reintenta? | Destino |
+|-----------|-----------|-------------|---------|
+| 5xx, 408, 429 | `AbmUnavailableException` | Sí (capa 1 y capa 2) | Agotado → DLT → `ABM_TIMEOUT` |
+| Timeout de lectura o de conexión, conexión rechazada o cortada | `AbmUnavailableException` | Sí (capa 1 y capa 2) | Agotado → DLT → `ABM_TIMEOUT` |
+| Circuit breaker abierto (no se llama a ABM) | `AbmUnavailableException` | Capa 1 no (corta en el acto); capa 2 sí | Agotado → DLT → `ABM_TIMEOUT` |
+| 4xx de contrato (400, 422, …) o 2xx sin `abm_operation_id` | `AbmContractException` | No (y el CB la ignora) | DLT directo → `ABM_TIMEOUT` ("rechazó el pedido por contrato") |
+| Poison pill (JSON inválido, sin `nomination_id`) | `InvalidEventException` | No | DLT directo, solo log ERROR (no hay estado) |
+| Nominación inexistente | `NominationNotFoundException` | No | DLT directo, solo log ERROR |
+| **Rechazo funcional** de ABM (`REJECTED` por `abm.responses.v1`) | — (no es un error) | No | `REJECTED` + `nomination.result`; el HTTP fue 202 y el CB lo cuenta como éxito |
+
+**Rechazo funcional vs falla técnica.** Un rechazo es una **respuesta** de ABM, por el canal de respuestas, con un
+motivo de negocio: reintentar daría el mismo resultado. Una falla técnica es la **ausencia** de respuesta (o un 5xx):
+no dice nada sobre la nominación, por eso se reintenta y, agotada, el estado es `ABM_TIMEOUT` ("no sabemos"), no
+`REJECTED`.
+
+**Peor caso de bloqueo de la capa 1 (~6,6s).** Un mensaje ocupa al consumer a lo sumo 3 × 2s de read-timeout +
+~0,6s de esperas (200ms + 400ms, con jitter hasta ~0,9s). El read-timeout (2s) queda por debajo del umbral de
+slow-call (3s) a propósito: una llamada que corta por timeout cuenta como **falla** del CB. Los reintentos largos
+(10s, 1m, 5m) **no bloquean la partición**: el mensaje se reenvía a un tópico de retry y la partición principal sigue
+con las demás nominaciones (E10); el tópico de retry lo consume recién cuando vence su espera. Si el CB está abierto,
+cada intento falla en microsegundos (fail fast) y ABM no recibe carga mientras se recupera; las esperas de la capa 2
+(1m, 5m) superan los 30s de CB abierto, así que el reintento siguiente lo encuentra en HALF_OPEN/CLOSED.
+Con los defaults, una sola nominación contra un ABM caído ya genera hasta 12 llamadas (4 pasadas × 3 intentos):
+pasada la 10ª el CB abre y el resto de las pasadas (de esa y de las demás nominaciones) falla sin llamar a ABM.
+
+**Recuperación.**
+
+- **DLT → `ABM_TIMEOUT`**: agotada la capa 2, el handler del DLT pasa la nominación a `ABM_TIMEOUT` (source
+  `ABM_ADAPTER`, detalle "Reintentos agotados: ABM no disponible"). No publica `nomination.result`.
+- **Sweeper**: ABM aceptó (`PENDING_ABM`) pero no respondió dentro del SLA → `ABM_TIMEOUT` (source `SWEEPER`).
+  Seguro en multi-instancia por lock optimista.
+- **Respuesta tardía**: `ABM_TIMEOUT` no es final. Si ABM responde después, se aplica (`ABM_TIMEOUT → APPROVED/REJECTED`)
+  y recién ahí se publica el **único** `nomination.result` (escenario SLOW).
+- **Reproceso controlado** (operador): `POST /internal/v1/nominations/{id}/reprocess` → `ABM_TIMEOUT → RECEIVED` +
+  nuevo `nomination.requested` en una TX; responde 202. Desde otro estado: 409 `INVALID_STATE_TRANSITION`. ABM es
+  idempotente por `nomination_id`, así que reenviar nunca crea un segundo alta.
+- **Republicar desde el DLT**: ver [`docs/events.md`](docs/events.md#reprocesar-desde-el-dlt). Runbook de
+  alertas, diagnóstico y recuperación: [`docs/operations.md`](docs/operations.md).
+
+**Circuit breaker en Actuator.** `GET /actuator/health` → `components.circuitBreakers.details.abm` con `status`
+(`UP` / `CIRCUIT_OPEN` / `CIRCUIT_HALF_OPEN`) y `details.state`, `failureRate`, `slowCallRate`, llamadas fallidas y no
+permitidas. El CB abierto **no** baja el estado general de la app (ABM caído no es motivo para sacar la instancia
+del balanceador). Las transiciones se loguean (ERROR al abrir).
+
+Tests: `ResilientAbmClientTest` / `ResilientAbmClientHttpTest` (capa 1: qué se reintenta, CB, timeout real),
+`AbmCircuitBreakerHealthIntegrationTest` (cableado y Actuator), `AbmAdapterRetryIntegrationTest` (capa 2: tópicos de
+retry, DLT, contrato, poison pill, partición no bloqueada), `AbmTimeoutRecoveryIntegrationTest` (sweeper, reproceso,
+respuesta tardía) y `AbmResilienceIntegrationTest` (E2E con el simulador real y tiempos comprimidos: FAIL, SLOW con
+respuesta tardía, SILENT + sweeper + reproceso, apertura y recuperación del CB, rechazo funcional sin reintentos).
 
 ## Estructura
 
@@ -214,6 +302,7 @@ Contrato completo: [`docs/openapi.yaml`](docs/openapi.yaml) · Swagger UI: http:
 | `POST` | `/v1/nominations` | **202** + `Location` + `Idempotent-Replayed: true\|false`. Body con `status: RECEIVED` |
 | `GET` | `/v1/nominations/{id}` | **200** estado actual (`account_id` y `card_id` enmascarados) |
 | `GET` | `/v1/nominations/{id}/history` | **200** transiciones en orden cronológico |
+| `POST` | `/internal/v1/nominations/{id}/reprocess` | **202** reproceso de una nominación en `ABM_TIMEOUT` (operador, sin `X-Entity-Id`; ver [Resiliencia](#resiliencia-e6)) |
 
 Headers:
 
@@ -237,6 +326,7 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 | `NOT_ACCEPTABLE` | 406 | `Accept` que la API no puede producir |
 | `IDEMPOTENCY_CONFLICT` | 409 | `request_id` ya usado por la entidad con otro contenido |
 | `CONCURRENT_MODIFICATION` | 409 | Lock optimista: otra operación modificó la nominación; reintentar |
+| `INVALID_STATE_TRANSITION` | 409 | Reproceso de una nominación que no está en `ABM_TIMEOUT` |
 | `PAYLOAD_TOO_LARGE` | 413 | Solicitud que excede el tamaño permitido |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | `Content-Type` distinto de JSON |
 | `SERVICE_UNAVAILABLE` | 503 | Servicio no disponible temporalmente; reintentar |
@@ -252,6 +342,6 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 - [x] Fase 3 — API
 - [x] Fase 4 — Outbox + Kafka
 - [x] Fase 5 — ABM mock + respuesta
-- [ ] Fase 6 — Resiliencia
+- [x] Fase 6 — Resiliencia
 - [ ] Fase 7 — Seguridad y observabilidad
 - [ ] Fase 8 — E2E y entrega

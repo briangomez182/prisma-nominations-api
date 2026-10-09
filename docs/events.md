@@ -17,6 +17,10 @@ entrada `abm.responses.v1`, cuyo contrato fija ABM.
 - **Replicación:** `nominations.kafka.replication-factor` (1 local; en producción ≥ 3 con `min.insync.replicas=2`).
 - **DLT:** convención de Spring Kafka, `<tópico>-dlt`, con la **misma cantidad de particiones** que el original
   (el mensaje fallido va a la misma partición). Los crea `KafkaTopicsConfig` al arrancar.
+- **Tópicos de retry (solo ABM Adapter):** `nomination.requested.v1-retry-0`, `-retry-1`, `-retry-2` (uno por valor
+  de `nominations.abm.adapter.retry-delays`), mismas particiones, internos. Los crea Spring Kafka al arrancar.
+  Grupos: `abm-adapter-retry-0` / `-1` / `-2` y `abm-adapter-dlt` para el DLT. Ver
+  [ABM Adapter: reintentos no bloqueantes](#abm-adapter-reintentos-no-bloqueantes-y-dlt).
 
 ## Mensaje (eventos del servicio)
 
@@ -217,9 +221,11 @@ ABM Adapter, `nomination.requested.v1` → `nomination.requested.v1-dlt` (`AbmAd
 
 | Error | Tratamiento |
 |-------|-------------|
-| Falla técnica de ABM (timeout, conexión, 5xx, 408, 429) u otro error transitorio | `nominations.abm.adapter.max-attempts` intentos con backoff fijo (`.backoff`); agotados → DLT. La nominación queda en `RECEIVED` (fase 6: Resilience4j y paso a `ABM_TIMEOUT`). |
-| Rechazo de contrato de ABM (resto de 4xx, 2xx sin `abm_operation_id`) | Directo al DLT |
-| Poison pill (JSON inválido, sin `nomination_id`) o nominación inexistente | Directo al DLT |
+| Falla técnica de ABM (timeout, conexión, 5xx, 408, 429, circuit breaker abierto) u otro error inesperado | Capa 1 en proceso (Resilience4j: 3 intentos + CB) y luego capa 2: tópicos de retry no bloqueantes (10s, 1m, 5m); agotados → DLT → `ABM_TIMEOUT` |
+| Rechazo de contrato de ABM (resto de 4xx, 2xx sin `abm_operation_id`) | Directo al DLT → `ABM_TIMEOUT` ("ABM rechazó el pedido por contrato") |
+| Poison pill (JSON inválido, sin `nomination_id`) o nominación inexistente | Directo al DLT, solo log ERROR |
+
+Detalle en [ABM Adapter: reintentos no bloqueantes y DLT](#abm-adapter-reintentos-no-bloqueantes-y-dlt).
 
 Consumer de respuestas, `abm.responses.v1` → `abm.responses.v1-dlt` (`AbmResponseConsumerConfig`):
 
@@ -232,11 +238,50 @@ Consumer de respuestas, `abm.responses.v1` → `abm.responses.v1-dlt` (`AbmRespo
 Un rechazo funcional de ABM (`REJECTED`) **no** es un error: se aplica como cualquier respuesta (D10).
 
 El mensaje llega al DLT **sin modificar** (misma key, mismo valor, headers originales) más los headers de
-diagnóstico de Spring Kafka (`kafka_dlt-exception-fqcn`, `kafka_dlt-exception-message`,
-`kafka_dlt-original-topic`, `kafka_dlt-original-partition`, `kafka_dlt-original-offset`, …). El offset del
-original avanza: un mensaje roto no bloquea la partición.
+diagnóstico de Spring Kafka. El offset del original avanza: un mensaje roto no bloquea la partición. Los nombres de
+esos headers dependen de cómo se armó el reintento:
+
+| DLT | Mecanismo | Headers de diagnóstico |
+|-----|-----------|------------------------|
+| `nomination.result.v1-dlt`, `abm.responses.v1-dlt` | `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` (reintento bloqueante) | `kafka_dlt-exception-fqcn`, `kafka_dlt-exception-cause-fqcn`, `kafka_dlt-exception-message`, `kafka_dlt-exception-stacktrace`, `kafka_dlt-original-topic`, `kafka_dlt-original-partition`, `kafka_dlt-original-offset`, `kafka_dlt-original-timestamp`, `kafka_dlt-original-consumer-group` |
+| `nomination.requested.v1-dlt` | Tópicos de retry (`RetryTopicConfiguration`) | **Sin** el prefijo `dlt-`: `kafka_exception-fqcn`, `kafka_exception-cause-fqcn`, `kafka_exception-message`, `kafka_exception-stacktrace`, `kafka_original-topic`, `kafka_original-partition`, `kafka_original-offset`, `kafka_original-timestamp`, `kafka_original-timestamp-type`; además `retry_topic-attempts`, `retry_topic-original-timestamp` y `retry_topic-backoff-timestamp`. Excepción: el grupo sigue siendo `kafka_dlt-original-consumer-group` |
+
+En `nomination.requested.v1-dlt`, `kafka_original-topic` es el tópico **principal** (`nomination.requested.v1`), no
+el último de retry; `kafka_exception-fqcn` es siempre `ListenerExecutionFailedException`, y lo que importa es
+`kafka_exception-cause-fqcn`, la causa raíz que usa el handler del DLT para decidir (`AbmUnavailableException`,
+`AbmContractException`, `InvalidEventException`, `NominationNotFoundException`). Ejemplo real con el CB abierto:
+`kafka_exception-message: Listener failed; ABM no disponible: circuit breaker abierto (estado OPEN)`.
+
+### ABM Adapter: reintentos no bloqueantes y DLT
+
+```
+nomination.requested.v1 ──falla técnica──▶ -retry-0 (10s) ──▶ -retry-1 (1m) ──▶ -retry-2 (5m) ──▶ -dlt
+        └──── contrato / poison pill / nominación inexistente (sin reintentos) ──────────────────────▲
+```
+
+- Cada pasada (principal y cada retry) llama a ABM a través de la **capa 1** (`ResilientAbmClient`: hasta 3 intentos
+  con backoff corto, dentro de un circuit breaker). Solo si la capa 1 se agota (o el CB está abierto) el mensaje
+  pasa al tópico de retry siguiente.
+- El reenvío conserva key (`nomination_id`), valor y headers (`event_id`, `correlation_id`) y va a la misma
+  partición. El tópico de retry no consume el mensaje hasta que vence su espera (la partición de ese tópico se pausa;
+  la del principal sigue avanzando: un ABM caído no frena las demás nominaciones, E10).
+- **DLT**: lo consume `NominationRequestedDltHandler` (grupo `abm-adapter-dlt`) según `kafka_exception-cause-fqcn`:
+  falla técnica agotada → `ABM_TIMEOUT` con "Reintentos agotados: ABM no disponible"; contrato → `ABM_TIMEOUT` con
+  "ABM rechazó el pedido por contrato"; poison pill o nominación inexistente → solo log ERROR. Si ABM ya respondió
+  mientras tanto, no se toca nada. `ABM_TIMEOUT` **no** publica `nomination.result`.
+- Si el handler del DLT falla, se loguea y el mensaje queda en el DLT (sin bucle de republicación).
 
 ### Reprocesar desde el DLT
+
+**Nominaciones en `ABM_TIMEOUT` (DLT de `nomination.requested.v1`).** La vía preferida no es republicar el mensaje
+sino el endpoint de operación: `POST /internal/v1/nominations/{id}/reprocess` (202). Pasa la nominación a
+`RECEIVED` y encola un `nomination.requested` **nuevo** (nuevo `event_id`) en el outbox, en una TX: queda
+auditado en el historial (source `OPERATOR`) y respeta la máquina de estados (409 `INVALID_STATE_TRANSITION` si
+ya no está en `ABM_TIMEOUT`, p.ej. porque ABM respondió tarde). Republicar a mano el mensaje del DLT a
+`nomination.requested.v1` **no** sirve para una nominación en `ABM_TIMEOUT`: el adapter solo envía desde `RECEIVED`
+y lo descarta como reentrega. Runbook completo en [`operations.md`](operations.md).
+
+**Resto de los DLT** (`nomination.result.v1-dlt`, `abm.responses.v1-dlt`):
 
 1. Diagnosticar con los headers `kafka_dlt-*` y corregir la causa (bug del consumidor, dato, infraestructura).
 2. Volver a publicar los mensajes del DLT en el tópico original **con sus headers** (en especial `event_id`):
