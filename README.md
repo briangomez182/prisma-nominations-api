@@ -6,6 +6,93 @@ idempotencia de punta a punta y patrón Transactional Outbox. Integración simul
 
 > Caso ficticio. No contiene datos reales de clientes, tarjetas, cuentas ni credenciales.
 
+## Inicio rápido
+
+Para probarlo desde cero en unos 5 minutos. Solo hace falta Docker; no hace falta Java ni Maven.
+
+**Requisitos**
+
+- Docker Desktop (o Docker Engine + Compose v2) corriendo, con al menos 4 GB de memoria asignada.
+- Para los scripts: `bash`, `curl`, `jq` y `openssl`. En macOS: `brew install jq`. En Windows: usar WSL o Git Bash.
+- Puertos libres: 8080 (API), 5432 (PostgreSQL), 9092 (Kafka), 8081 (Kafka UI), 9090 (Prometheus), 3000 (Grafana),
+  16686, 4317 y 4318 (Jaeger). Si el 8080 o el 3000 están ocupados: `APP_PORT=9080` / `GRAFANA_PORT=3001` delante
+  del `docker compose up` (con otro puerto de API, los scripts usan `BASE_URL=http://localhost:9080`).
+
+**1. Clonar y levantar todo**
+
+```bash
+git clone https://github.com/briangomez182/prisma-nominations-api.git
+cd prisma-nominations-api
+docker compose up -d --build        # la primera vez tarda ~3 min (descarga imágenes y compila la app)
+docker compose ps                   # esperar a que "app" figure como healthy (~20 s después de arrancar)
+curl -s http://localhost:8080/actuator/health    # {"status":"UP"}
+```
+
+**2. Crear una nominación y seguirla**
+
+```bash
+TOKEN=$(scripts/mint-token.sh ENT01)     # JWT de demo de la entidad ENT01 (vence en 1 h)
+
+curl -i -X POST http://localhost:8080/v1/nominations \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"request_id":"0b4a9f2e-6c1d-4e7a-8b3f-5d2c1a0e9f87","customer_id":"CUST-000123",
+       "account_id":"0001234567890987654","card_id":"tok_demo_ok_01","alias":"CUENTA SUELDO"}'
+# → 202 Accepted + header Location: /v1/nominations/<id>
+
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/nominations/<id> | jq           # RECEIVED → PENDING_ABM → APPROVED (~4 s)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/nominations/<id>/history | jq   # transiciones con correlation_id
+```
+
+El `card_id` elige la respuesta del ABM simulado: `tok_demo_REJECT_01` rechaza, y `FAIL`, `SLOW`, `SILENT` o `DUP`
+simulan fallas ([`docs/abm-mock.md`](docs/abm-mock.md)). Repetir el mismo POST devuelve la misma nominación
+(idempotencia).
+
+**3. Recorrer los 10 escenarios del enunciado (E1–E10)**
+
+```bash
+scripts/demo.sh            # ~2 min, termina con un checklist ✓/✗ por escenario
+scripts/demo.sh E6         # un solo escenario
+```
+
+**Con Postman (alternativa a `curl`)**
+
+1. En Postman: **Import** → arrastrar los dos archivos de [`docs/postman/`](docs/postman):
+   `prisma-nominations.postman_collection.json` y `local.postman_environment.json`.
+2. Arriba a la derecha, elegir el environment **Prisma Nominations - local**. Si la API corre en otro puerto,
+   cambiar ahí `base_url`.
+3. Correr las carpetas en orden (E1 → E7) o toda la colección con **Run collection**. Cada request tiene tests que
+   validan el resultado esperado.
+
+No hace falta generar tokens: el pre-request de la colección firma los JWT de demo en cada request (canal de ENT01,
+otra entidad, solo lectura y operador), igual que `scripts/mint-token.sh`. E8–E10 apagan servicios o generan
+volumen, así que se muestran con `scripts/demo.sh`. Desde la terminal, la misma colección corre con Newman:
+`npx newman run docs/postman/prisma-nominations.postman_collection.json -e docs/postman/local.postman_environment.json`.
+
+**4. Mirar**
+
+| Qué | URL |
+|-----|-----|
+| Swagger UI (probar la API desde el navegador; token con `scripts/mint-token.sh ENT01`) | http://localhost:8080/swagger-ui.html |
+| Kafka UI (tópicos, mensajes y lag de consumidores) | http://localhost:8081 |
+| Jaeger (traza de punta a punta de cada nominación) | http://localhost:16686 |
+| Grafana (tablero operativo, admin/admin) | http://localhost:3000 |
+| Prometheus (métricas y alertas) | http://localhost:9090/alerts |
+
+**5. Correr los tests (opcional, requiere Java 21 + Maven + Docker)**
+
+```bash
+cd app && mvn test                        # 262 tests, ~4 min, Postgres y Kafka reales con Testcontainers
+cd app && mvn test -Dgroups=E6            # solo un escenario
+```
+
+**6. Bajar todo**
+
+```bash
+docker compose down -v      # -v borra también los datos
+```
+
+Más opciones (app en el host, sin compose) en [Cómo correr](#cómo-correr).
+
 ## Flujo end to end
 
 ```
@@ -409,7 +496,7 @@ evidencia es `mvn test -Dgroups=E8` / `-Dgroups=E9`.
 
 ## API
 
-Contrato completo: [`docs/openapi.yaml`](docs/openapi.yaml) · Swagger UI: http://localhost:8080/swagger-ui.html · Ejemplos: [`docs/requests.http`](docs/requests.http) (IntelliJ HTTP Client).
+Contrato completo: [`docs/openapi.yaml`](docs/openapi.yaml) · Swagger UI: http://localhost:8080/swagger-ui.html · Ejemplos: [`docs/requests.http`](docs/requests.http) (IntelliJ HTTP Client) y colección de Postman en [`docs/postman/`](docs/postman) (ver [Inicio rápido](#inicio-rápido)).
 
 | Método | Ruta | Respuesta |
 |--------|------|-----------|

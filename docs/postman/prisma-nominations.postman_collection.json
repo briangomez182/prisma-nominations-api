@@ -1,0 +1,1077 @@
+{
+  "info": {
+    "_postman_id": "817b491a-8644-5591-8efc-9aee6fe4a2c6",
+    "name": "Prisma Nominations API",
+    "description": "Escenarios E1–E7 de la prueba técnica. Los JWT de demo se generan solos (pre-request de la colección). Correr las carpetas en orden, o toda la colección con el Collection Runner. E8–E10 apagan servicios o generan volumen: ver scripts/demo.sh y scripts/load-test.sh.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Genera los JWT de demo (HS256) en cada request, igual que scripts/mint-token.sh.",
+          "// SOLO DEMO: en producción los tokens los emite el IdP corporativo (client credentials).",
+          "const cryptoJs = require('crypto-js');",
+          "const secret = pm.variables.get('jwt_secret');",
+          "const issuer = pm.variables.get('jwt_issuer');",
+          "const b64url = (words) => cryptoJs.enc.Base64.stringify(words).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "const json64 = (obj) => b64url(cryptoJs.enc.Utf8.parse(JSON.stringify(obj)));",
+          "function mint(entityId, scope) {",
+          "    const now = Math.floor(Date.now() / 1000);",
+          "    const claims = { iss: issuer, sub: 'postman', iat: now, exp: now + 3600, scope: scope };",
+          "    if (entityId) { claims.entity_id = entityId; }",
+          "    const input = json64({ alg: 'HS256', typ: 'JWT' }) + '.' + json64(claims);",
+          "    return input + '.' + b64url(cryptoJs.HmacSHA256(input, cryptoJs.enc.Base64.parse(secret)));",
+          "}",
+          "const entity = pm.variables.get('entity_id');",
+          "pm.variables.set('token', mint(entity, 'nominations:write nominations:read'));",
+          "pm.variables.set('token_other_entity', mint(pm.variables.get('other_entity_id'), 'nominations:write nominations:read'));",
+          "pm.variables.set('token_read_only', mint(entity, 'nominations:read'));",
+          "pm.variables.set('token_operator', mint(null, 'nominations:operate'));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "request_id",
+      "value": ""
+    },
+    {
+      "key": "nomination_id",
+      "value": ""
+    },
+    {
+      "key": "request_id_rejected",
+      "value": ""
+    },
+    {
+      "key": "rejected_id",
+      "value": ""
+    },
+    {
+      "key": "request_id_silent",
+      "value": ""
+    },
+    {
+      "key": "silent_id",
+      "value": ""
+    },
+    {
+      "key": "request_id_dup",
+      "value": ""
+    },
+    {
+      "key": "dup_id",
+      "value": ""
+    },
+    {
+      "key": "request_id_pan",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Salud",
+      "description": "Verificar que la app está arriba antes de empezar.",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/actuator/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E1 - Solicitud válida",
+      "description": "Aceptación asincrónica (202) y trazabilidad con correlation_id e historial.",
+      "item": [
+        {
+          "name": "Crear nominación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "postman-e1"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_ok_01\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('request_id', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('Location', () => pm.response.to.have.header('Location'));",
+                  "pm.test('Idempotent-Replayed: false', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('false'));",
+                  "pm.test('status RECEIVED', () => pm.expect(pm.response.json().status).to.eql('RECEIVED'));",
+                  "pm.collectionVariables.set('nomination_id', pm.response.json().nomination_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar estado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{nomination_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{nomination_id}}"
+              ]
+            },
+            "description": "RECEIVED → PENDING_ABM → APPROVED en unos segundos. account_id y card_id vienen enmascarados."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('datos sensibles enmascarados', () => pm.expect(pm.response.json().account_id).to.match(/^\\*+\\d{4}$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar historial",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{nomination_id}}/history",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{nomination_id}}",
+                "history"
+              ]
+            },
+            "description": "Cada transición con su origen y el mismo correlation_id del POST."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('tiene transiciones', () => pm.expect(pm.response.json().items.length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Otra entidad no la ve (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_other_entity}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{nomination_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{nomination_id}}"
+              ]
+            },
+            "description": "La entidad sale del JWT: otra entidad recibe 404 (no 403) para no revelar que existe."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('code = NOMINATION_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('NOMINATION_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E2 - Datos obligatorios ausentes",
+      "description": "Rechazo inmediato con error RFC 9457 claro y consistente.",
+      "item": [
+        {
+          "name": "Faltan campos (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alias\": \"SIN DATOS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('code = VALIDATION_ERROR', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('lista los campos con error', () => pm.expect(pm.response.json().errors.length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "card_id con forma de PAN (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "description": "Nunca se acepta un PAN: card_id debe ser un token. El error no repite el valor recibido.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id_pan}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"4111111111111111\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('request_id_pan', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('code = VALIDATION_ERROR', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('no repite el PAN', () => pm.expect(pm.response.text()).to.not.include('4111111111111111'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSON inválido (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\": ",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('code = MALFORMED_REQUEST', () => pm.expect(pm.response.json().code).to.eql('MALFORMED_REQUEST'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sin token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_ok_01\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "pm.test('code = UNAUTHORIZED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHORIZED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token solo lectura no puede crear (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_read_only}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_ok_01\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('code = FORBIDDEN', () => pm.expect(pm.response.json().code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E3 - Solicitud repetida",
+      "description": "Mismo request_id: respuesta idempotente, sin doble envío ni doble evento. Correr después de E1.",
+      "item": [
+        {
+          "name": "Repetir el mismo POST (202 replay)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_ok_01\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('Idempotent-Replayed: true', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true'));",
+                  "pm.test('misma nominación', () => pm.expect(pm.response.json().nomination_id).to.eql(pm.collectionVariables.get('nomination_id')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mismo request_id con otro contenido (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_ok_01\",\n  \"alias\": \"OTRO ALIAS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('code = IDEMPOTENCY_CONFLICT', () => pm.expect(pm.response.json().code).to.eql('IDEMPOTENCY_CONFLICT'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E4 - ABM aprueba",
+      "description": "Estado final APPROVED y evento nomination.result.v1 (ver en Kafka UI).",
+      "item": [
+        {
+          "name": "Esperar estado final y consultar",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{nomination_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{nomination_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Consulta el estado hasta que llegue a un estado final (máx ~20 s). ABM es asincrónico.",
+                  "const finals = [\"APPROVED\", \"REJECTED\", \"ABM_TIMEOUT\"];",
+                  "const EXTRA_WAIT = 0;",
+                  "const url = pm.variables.replaceIn('{{base_url}}/v1/nominations/{{nomination_id}}');",
+                  "const auth = 'Bearer ' + pm.variables.get('token');",
+                  "let tries = 0;",
+                  "function poll() {",
+                  "    pm.sendRequest({ url: url, method: 'GET', header: { Authorization: auth } }, (err, res) => {",
+                  "        const status = !err && res.code === 200 ? res.json().status : null;",
+                  "        if (!finals.includes(status) && ++tries < 20) { setTimeout(poll, 1000); }",
+                  "        else if (EXTRA_WAIT) { setTimeout(() => {}, EXTRA_WAIT); }",
+                  "    });",
+                  "}",
+                  "poll();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('APPROVED', () => pm.expect(pm.response.json().status).to.eql('APPROVED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E5 - ABM rechaza",
+      "description": "Estado REJECTED con motivo normalizado; el código interno de ABM no se expone.",
+      "item": [
+        {
+          "name": "Crear nominación que ABM rechaza",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id_rejected}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_REJECT_030\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('request_id_rejected', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('rejected_id', pm.response.json().nomination_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Esperar estado final y consultar",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{rejected_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{rejected_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Consulta el estado hasta que llegue a un estado final (máx ~20 s). ABM es asincrónico.",
+                  "const finals = [\"APPROVED\", \"REJECTED\", \"ABM_TIMEOUT\"];",
+                  "const EXTRA_WAIT = 0;",
+                  "const url = pm.variables.replaceIn('{{base_url}}/v1/nominations/{{rejected_id}}');",
+                  "const auth = 'Bearer ' + pm.variables.get('token');",
+                  "let tries = 0;",
+                  "function poll() {",
+                  "    pm.sendRequest({ url: url, method: 'GET', header: { Authorization: auth } }, (err, res) => {",
+                  "        const status = !err && res.code === 200 ? res.json().status : null;",
+                  "        if (!finals.includes(status) && ++tries < 20) { setTimeout(poll, 1000); }",
+                  "        else if (EXTRA_WAIT) { setTimeout(() => {}, EXTRA_WAIT); }",
+                  "    });",
+                  "}",
+                  "poll();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('REJECTED', () => pm.expect(pm.response.json().status).to.eql('REJECTED'));",
+                  "pm.test('motivo normalizado', () => pm.expect(pm.response.json().rejection_reason).to.eql('CARD_NOT_ELIGIBLE'));",
+                  "pm.test('no expone el código de ABM', () => pm.expect(pm.response.text()).to.not.include('ABM-030'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E6 - ABM no responde",
+      "description": "ABM recibe la solicitud y nunca responde: el sweeper la pasa a ABM_TIMEOUT (~30 s con el perfil demo) y un operador la reprocesa.",
+      "item": [
+        {
+          "name": "Crear nominación que ABM no responde",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id_silent}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_SILENT_01\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('request_id_silent', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('silent_id', pm.response.json().nomination_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar (PENDING_ABM, a los ~30 s ABM_TIMEOUT)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{silent_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{silent_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Operador reprocesa (202 si está en ABM_TIMEOUT, 409 si no)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_operator}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/internal/v1/nominations/{{silent_id}}/reprocess",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "internal",
+                "v1",
+                "nominations",
+                "{{silent_id}}",
+                "reprocess"
+              ]
+            },
+            "description": "Requiere scope nominations:operate. Esperar a que la nominación esté en ABM_TIMEOUT; antes devuelve 409 INVALID_STATE_TRANSITION."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 o 409', () => pm.expect(pm.response.code).to.be.oneOf([202, 409]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "E7 - Respuesta duplicada de ABM",
+      "description": "ABM envía la misma respuesta dos veces: se aplica una sola vez.",
+      "item": [
+        {
+          "name": "Crear nominación con respuesta duplicada",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id_dup}}\",\n  \"customer_id\": \"CUST-000123\",\n  \"account_id\": \"0001234567890987654\",\n  \"card_id\": \"tok_demo_DUP_01\",\n  \"alias\": \"CUENTA SUELDO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('request_id_dup', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('dup_id', pm.response.json().nomination_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Esperar y ver historial: una sola transición a APPROVED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/nominations/{{dup_id}}/history",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "nominations",
+                "{{dup_id}}",
+                "history"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Consulta el estado hasta que llegue a un estado final (máx ~20 s). ABM es asincrónico.",
+                  "const finals = [\"APPROVED\", \"REJECTED\", \"ABM_TIMEOUT\"];",
+                  "const EXTRA_WAIT = 3000;",
+                  "const url = pm.variables.replaceIn('{{base_url}}/v1/nominations/{{dup_id}}');",
+                  "const auth = 'Bearer ' + pm.variables.get('token');",
+                  "let tries = 0;",
+                  "function poll() {",
+                  "    pm.sendRequest({ url: url, method: 'GET', header: { Authorization: auth } }, (err, res) => {",
+                  "        const status = !err && res.code === 200 ? res.json().status : null;",
+                  "        if (!finals.includes(status) && ++tries < 20) { setTimeout(poll, 1000); }",
+                  "        else if (EXTRA_WAIT) { setTimeout(() => {}, EXTRA_WAIT); }",
+                  "    });",
+                  "}",
+                  "poll();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('una sola transición a APPROVED', () => pm.expect(pm.response.json().items.filter(i => i.to_status === 'APPROVED').length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
