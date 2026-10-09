@@ -29,10 +29,11 @@ class SweepStaleNominationsServiceTest {
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
 
     private final InMemoryNominationRepository repository = InMemoryNominationRepository.withOptimisticLocking();
+    private final RecordingNominationMetrics metrics = new RecordingNominationMetrics();
 
     private SweepStaleNominationsService service(int batchSize) {
         return new SweepStaleNominationsService(repository, TransactionOperations.withoutTransaction(), CLOCK, SLA,
-                batchSize);
+                batchSize, metrics);
     }
 
     @Test
@@ -57,6 +58,7 @@ class SweepStaleNominationsServiceTest {
             assertThat(change.detail()).contains("SLA").contains("PT15M");
             assertThat(change.occurredAt()).isEqualTo(NOW);
         });
+        assertThat(metrics.calls).containsExactly("abmTimeout:SWEEPER");
     }
 
     @Test
@@ -103,9 +105,9 @@ class SweepStaleNominationsServiceTest {
     @Test
     void rejectsInvalidConfiguration() {
         var tx = TransactionOperations.withoutTransaction();
-        assertThatThrownBy(() -> new SweepStaleNominationsService(repository, tx, CLOCK, Duration.ZERO, 10))
+        assertThatThrownBy(() -> new SweepStaleNominationsService(repository, tx, CLOCK, Duration.ZERO, 10, metrics))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new SweepStaleNominationsService(repository, tx, CLOCK, SLA, 0))
+        assertThatThrownBy(() -> new SweepStaleNominationsService(repository, tx, CLOCK, SLA, 0, metrics))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

@@ -1,0 +1,195 @@
+# Alertas accionables de prisma-nominations-api.
+# Cada alerta lleva: severity (critical = actuar ya / guardia; warning = actuar en horario o anticipa un incidente),
+# summary, description (qué pasa y qué hacer primero) y runbook (sección de docs/operations.md).
+# Umbrales pensados para la demo; ver docs/observability.md (SLOs y tabla de indicadores tempranos).
+groups:
+  - name: nominations-api
+    rules:
+      - alert: NominationsApiDown
+        expr: up{job="prisma-nominations-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "La API de nominaciones no responde al scrape"
+          description: "Prometheus no puede leer /actuator/prometheus de {{ $labels.instance }} hace más de 1 minuto. Verificar que el proceso esté vivo (/actuator/health/liveness) y sus logs de arranque."
+          runbook: "docs/operations.md#nominationsapidown"
+
+      - alert: ApiErrorRateHigh
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{application="prisma-nominations-api", uri!~"/actuator.*|/abm-mock.*", status=~"5.."}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="prisma-nominations-api", uri!~"/actuator.*|/abm-mock.*"}[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Más del 1% de respuestas 5xx en la API"
+          description: "Tasa de 5xx = {{ $value | humanizePercentage }} en los últimos 5m (SLO de disponibilidad 99,9%). Mirar qué uri/status concentra los errores en el tablero y los logs ERROR; causas típicas: PostgreSQL (pool Hikari), excepciones no mapeadas."
+          runbook: "docs/operations.md#apierrorratehigh"
+
+      - alert: ApiLatencyP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{application="prisma-nominations-api", method="POST", uri="/v1/nominations"}[5m]))
+          ) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 de POST /v1/nominations por encima de 300ms"
+          description: "p95 de aceptación = {{ $value | humanizeDuration }} (SLO 300ms). El POST solo escribe en PostgreSQL (nominación + historial + outbox): revisar conexiones pendientes de Hikari, locks y CPU."
+          runbook: "docs/operations.md#apilatencyp95high"
+
+      - alert: DbPoolSaturated
+        expr: max(hikaricp_connections_pending{application="prisma-nominations-api"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hilos esperando conexión de PostgreSQL"
+          description: "{{ $value }} hilos esperan conexión del pool Hikari hace 5m. Anticipa latencia y 5xx de la API y frena al relay del outbox. Revisar queries lentas, conexiones activas y tamaño del pool."
+          runbook: "docs/operations.md#dbpoolsaturated"
+
+  - name: nominations-abm
+    rules:
+      - alert: CircuitBreakerAbmOpen
+        expr: max(resilience4j_circuitbreaker_state{application="prisma-nominations-api", name="abm", state="open"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker de ABM abierto"
+          description: "El CB 'abm' está OPEN hace más de 1 minuto: ABM está caído o muy lento y no se le envían altas. Las nominaciones esperan en los tópicos de retry (10s, 1m, 5m) y las que agoten pasan a ABM_TIMEOUT. Escalar al equipo de ABM."
+          runbook: "docs/operations.md#circuitbreakerabmopen"
+
+      - alert: AbmUnavailableRateHigh
+        expr: |
+          (
+            sum(rate(abm_submissions_total{application="prisma-nominations-api", outcome="UNAVAILABLE"}[5m]))
+            /
+            sum(rate(abm_submissions_total{application="prisma-nominations-api"}[5m]))
+          ) > 0.2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Más del 20% de envíos a ABM terminan en UNAVAILABLE"
+          description: "{{ $value | humanizePercentage }} de los envíos a ABM fallan por indisponibilidad (5xx, timeout, conexión). Anticipa la apertura del circuit breaker (umbral 50%). Avisar a ABM antes de que el CB abra."
+          runbook: "docs/operations.md#abmunavailableratehigh"
+
+      - alert: AbmFailureRateRising
+        expr: max(resilience4j_circuitbreaker_failure_rate{application="prisma-nominations-api", name="abm"}) > 25
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tasa de fallas del CB de ABM en {{ $value }}% (abre al 50%)"
+          description: "La ventana del circuit breaker 'abm' acumula {{ $value }}% de fallas. Indicador temprano: a este ritmo el CB abre. Revisar latencia y errores de ABM."
+          runbook: "docs/operations.md#abmunavailableratehigh"
+
+      - alert: AbmContractErrors
+        expr: sum(increase(abm_submissions_total{application="prisma-nominations-api", outcome="CONTRACT_ERROR"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "ABM rechaza pedidos por contrato"
+          description: "{{ $value | humanize }} envíos a ABM fallaron por error de contrato (4xx) en 15m. No se reintentan: van al DLT y a ABM_TIMEOUT. Corregir dato o versión del contrato antes de reprocesar."
+          runbook: "docs/operations.md#abmcontracterrors"
+
+      - alert: AbmTimeoutsIncreasing
+        expr: sum by (source) (increase(nominations_abm_timeouts_total{application="prisma-nominations-api"}[15m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nominaciones pasando a ABM_TIMEOUT (source {{ $labels.source }})"
+          description: "{{ $value | humanize }} nominaciones pasaron a ABM_TIMEOUT en 15m por {{ $labels.source }} (ABM_ADAPTER = reintentos agotados; SWEEPER = ABM aceptó pero no respondió en 15m). Confirmar con ABM y reprocesar."
+          runbook: "docs/operations.md#abmtimeoutsincreasing"
+
+      - alert: NominationsStuckPendingAbm
+        expr: |
+          sum(nominations_open{application="prisma-nominations-api", status="PENDING_ABM"}) > 50
+          and
+          sum(delta(nominations_open{application="prisma-nominations-api", status="PENDING_ABM"}[15m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nominaciones acumulándose en PENDING_ABM"
+          description: "{{ $value }} nominaciones esperan respuesta de ABM y el número sigue creciendo. ABM acepta pero no responde por abm.responses.v1 (o el consumer de respuestas no avanza). Anticipa una ola de ABM_TIMEOUT por el sweeper."
+          runbook: "docs/operations.md#nominationsstuckpendingabm"
+
+      - alert: NominationsInAbmTimeout
+        expr: sum(nominations_open{application="prisma-nominations-api", status="ABM_TIMEOUT"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hay nominaciones en ABM_TIMEOUT sin resolver"
+          description: "{{ $value }} nominaciones siguen en ABM_TIMEOUT hace 30m (sin respuesta tardía). Requieren confirmación con ABM y reproceso por el endpoint interno."
+          runbook: "docs/operations.md#abmtimeoutsincreasing"
+
+      - alert: AbmResponseConflicts
+        expr: sum(increase(abm_responses_total{application="prisma-nominations-api", outcome="CONFLICT"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "ABM envió respuestas contradictorias"
+          description: "{{ $value | humanize }} respuestas de ABM contradicen un resultado ya aplicado (p.ej. APPROVED y luego REJECTED) en la última hora. Se ignoraron; hay una inconsistencia que ABM debe explicar. Buscar el log WARN 'Respuesta de ABM contradictoria'."
+          runbook: "docs/operations.md#abmresponseconflicts"
+
+      - alert: ResolutionLatencyP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(nominations_resolution_time_seconds_bucket{application="prisma-nominations-api"}[30m]))
+          ) > 300
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 de resolución end to end por encima de 5 minutos"
+          description: "p95 entre el alta y APPROVED/REJECTED = {{ $value | humanizeDuration }} (SLO 5m). Mirar dónde se demora: outbox (edad del pendiente más viejo), lag de consumers, reintentos a ABM o ABM lento en responder."
+          runbook: "docs/operations.md#resolutionlatencyp95high"
+
+  - name: nominations-async
+    rules:
+      - alert: OutboxBacklogGrowing
+        expr: max(outbox_oldest_pending_age_seconds{application="prisma-nominations-api"}) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "El outbox tiene eventos sin publicar hace más de 60s"
+          description: "El evento pendiente más viejo tiene {{ $value | humanizeDuration }} (frescura esperada < 5s). El relay no avanza: Kafka no acepta, el relay está apagado o la DB está lenta. Ningún evento nuevo llega a ABM mientras dure."
+          runbook: "docs/operations.md#outboxbackloggrowing"
+
+      - alert: OutboxPublishFailing
+        expr: max(outbox_failing{application="prisma-nominations-api"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Eventos del outbox fallando al publicar en Kafka"
+          description: "{{ $value }} eventos del outbox acumulan intentos fallidos de publicación. Revisar outbox_events.last_error y la salud de Kafka."
+          runbook: "docs/operations.md#outboxpublishfailing"
+
+      - alert: DltMessagesIncreasing
+        expr: sum by (topic) (increase(kafka_dlt_messages{application="prisma-nominations-api"}[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mensajes nuevos en el DLT {{ $labels.topic }}"
+          description: "Llegaron {{ $value | humanize }} mensajes a {{ $labels.topic }} en 10m. Son mensajes que agotaron la recuperación automática o que no se pueden procesar (contrato, poison pill). Diagnosticar con los headers del DLT."
+          runbook: "docs/operations.md#dltmessagesincreasing"
+
+      - alert: ConsumerLagHigh
+        expr: max by (client_id) (kafka_consumer_fetch_manager_records_lag_max{application="prisma-nominations-api", client_id!~".*retry.*"}) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Lag alto en el consumer {{ $labels.client_id }}"
+          description: "El consumer {{ $labels.client_id }} tiene {{ $value }} mensajes de atraso hace 10m. Anticipa demoras de resolución. Revisar si el consumer está bloqueado (ABM lento en la capa 1), rebalanceos o falta de instancias/particiones. Los tópicos -retry tienen lag por diseño y se excluyen."
+          runbook: "docs/operations.md#consumerlaghigh"

@@ -38,6 +38,13 @@ spring:
       enable-auto-commit: false
 
 nominations:
+  security:
+    jwt:
+      # SOLO DEMO, NO PRODUCTIVO: clave HS256 (base64, >= 256 bits) conocida por scripts/mint-token.sh.
+      # Sobreescribir con la variable de entorno NOMINATIONS_SECURITY_JWT_SECRET. En producción no hay clave
+      # compartida: se valida contra el JWKS del IdP corporativo (spring.security.oauth2.resourceserver.jwt.issuer-uri).
+      secret: ${NOMINATIONS_SECURITY_JWT_SECRET:PaMXbHK/6wehI0TgMBIYHUm7EjsB+82m10nGxpXDpYE=}
+      issuer: prisma-nominations-demo   # se valida el claim iss (y exp)
   kafka:
     partitions: 6               # unidad de paralelismo de los consumers
     replication-factor: 1       # local; en producción >= 3 con min.insync.replicas=2
@@ -77,6 +84,13 @@ nominations:
     response-delay: 2s          # en la vida real, minutos
     duplicate-gap: 300ms        # separación entre las dos respuestas del escenario DUP
     slow-http-delay: 10s        # demora del HTTP en el escenario SLOW (> read-timeout)
+  metrics:
+    db-gauges:
+      cache-ttl: 15s            # nominations_open y outbox_*: no consultar la base en cada scrape
+    kafka-dlt:
+      enabled: true             # kafka_dlt_messages (suma de end offsets de los *-dlt)
+      initial-delay: 5s
+      refresh-interval: 30s
   demo-consumer:
     enabled: true               # consumidor de ejemplo de nomination.result.v1
     group-id: notifications-demo
@@ -124,16 +138,36 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       probes:
         enabled: true
-      show-details: always      # demo; la fase de seguridad lo restringe (when-authorized)
+      # Detalle de componentes (DB, Kafka, circuit breaker) solo con token de operador; sin token, solo el estado.
+      show-details: when-authorized
+      roles: SCOPE_nominations:operate
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        nominations.resolution.time: true
+  tracing:
+    sampling:
+      probability: 1.0          # demo; en producción, muestreo parcial (p.ej. 0.1)
+    propagation:
+      type: w3c                 # header traceparent en HTTP y Kafka (default de Boot, explícito por contrato)
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces   # Jaeger/collector OTLP HTTP
   health:
     circuitbreakers:
       enabled: true             # estado del circuit breaker "abm" en /actuator/health (no baja el estado general)
 
+# Logs: texto legible por defecto (desarrollo). JSON ECS con el perfil json-logs (application-json-logs.yml) o con
+# LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs; el JSON incluye las claves del MDC (correlationId, traceId, spanId).
 logging:
   pattern:
-    level: "%5p [%X{correlationId:-}]"   # correlation id (MDC, CorrelationIdFilter) en cada línea de log
+    level: "%5p [%X{correlationId:-}]"   # correlation id de negocio (MDC: CorrelationIdFilter y listeners)
+    correlation: "[%X{traceId:-},%X{spanId:-}] "   # traza W3C (MDC del bridge OTel); vacío sin span activo

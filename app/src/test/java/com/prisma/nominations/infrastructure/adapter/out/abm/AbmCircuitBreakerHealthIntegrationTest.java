@@ -2,6 +2,7 @@ package com.prisma.nominations.infrastructure.adapter.out.abm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prisma.nominations.TestTokens;
 import com.prisma.nominations.TestcontainersConfiguration;
 import com.prisma.nominations.application.port.out.AbmClient;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
@@ -83,7 +85,9 @@ class AbmCircuitBreakerHealthIntegrationTest {
 
     private JsonNode health() throws Exception {
         HttpResponse<String> response = http.send(
-                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/actuator/health")).GET().build(),
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/actuator/health"))
+                        // El detalle de componentes solo se muestra con token de operador (show-details: when-authorized).
+                        .header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer()).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         return objectMapper.readTree(response.body());
     }

@@ -48,7 +48,7 @@ Canal ──POST /v1/nominations──▶ Nominations API ──(1 TX: nominaci�
 | D9 | Idempotencia de retorno ABM | La respuesta trae `nomination_id` + `request_id` + `correlation_id`. Si la nominación ya está en estado final → ACK sin efectos. `@Version` para respuestas simultáneas. | Tabla de dedup aparte | La máquina de estados ya sabe si la respuesta fue procesada (E7). |
 | D10 | Rechazo vs falla técnica | **Rechazo funcional** (respuesta de ABM con motivo) → `REJECTED`, no se reintenta. **Falla técnica** (timeout, 5xx, conexión) → reintento con backoff; agotado → DLT + `ABM_TIMEOUT` | Reintentar todo | Reintentar un rechazo funcional no cambia el resultado y duplica carga. Los 4xx de contrato tampoco se reintentan. |
 | D11 | Datos sensibles | `card_id` llega **tokenizado**: se rechaza cualquier valor con forma de PAN. `account_id` se expone y loguea **enmascarado**. | Recibir PAN y tokenizar adentro | La plataforma queda fuera del alcance PCI. En producción: cifrado de columna con KMS. |
-| D12 | Seguridad | **OAuth2 client credentials (JWT)**: `entity_id` sale del token, no del body. mTLS en el gateway. | API key | Aislamiento por entidad: una entidad no puede crear ni consultar nominaciones de otra. En la demo: JWT firmado con clave simétrica. |
+| D12 | Seguridad | **OAuth2 client credentials (JWT)**: `entity_id` sale del token, no del body. mTLS en el gateway. | API key | Aislamiento por entidad: una entidad no puede crear ni consultar nominaciones de otra. En la demo: JWT HS256 con clave de demo ([Seguridad](#seguridad)). |
 | D13 | Trazabilidad | Header `X-Correlation-Id` (se genera si no viene) → MDC → historial → outbox → headers de Kafka | — | Permite reconstruir la operación desde el canal hasta el evento final. |
 | D14 | Versionado | API con `/v1` en la URL. Eventos con sufijo `.v1` en el tópico + campo `schema_version`. Solo cambios aditivos dentro de una versión. | Schema Registry (Avro) en la demo | Compatible hacia atrás sin infraestructura extra. Schema Registry queda como evolución para producción. |
 | D15 | Concurrencia | **Virtual threads** (Java 21) para la API y los consumers | WebFlux reactivo | Código imperativo simple con alta concurrencia de I/O. |
@@ -264,6 +264,46 @@ retry, DLT, contrato, poison pill, partición no bloqueada), `AbmTimeoutRecovery
 respuesta tardía) y `AbmResilienceIntegrationTest` (E2E con el simulador real y tiempos comprimidos: FAIL, SLOW con
 respuesta tardía, SILENT + sweeper + reproceso, apertura y recuperación del CB, rechazo funcional sin reintentos).
 
+## Seguridad
+
+OAuth2 Resource Server con **JWT**. La entidad financiera sale del claim `entity_id` del token, nunca del request: una entidad no puede crear ni ver nominaciones de otra (responde 404, no 403, para no revelar existencia).
+
+| Ruta | Requisito |
+|------|-----------|
+| `POST /v1/nominations` | scope `nominations:write` + `entity_id` válido |
+| `GET /v1/nominations/**` | scope `nominations:read` + `entity_id` válido |
+| `/internal/**` (reproceso) | scope `nominations:operate` |
+| Actuator (salvo health, info, prometheus) | scope `nominations:operate`; el detalle de `/actuator/health` también |
+| `/actuator/health`, `/actuator/info`, `/actuator/prometheus`, Swagger, `/abm-mock/**` | públicos **solo en la demo** (en producción: red interna / puerto de management; el mock no existe) |
+| Cualquier otra ruta | denegada |
+
+- 401 y 403 salen en el mismo formato RFC 9457 (`UNAUTHORIZED` / `FORBIDDEN`) con `correlation_id` y `WWW-Authenticate: Bearer`, sin revelar el motivo concreto del rechazo.
+- Stateless, sin sesiones ni CSRF (API sin cookies), headers de seguridad por defecto de Spring Security.
+- Datos sensibles: `card_id` solo tokenizado (se rechaza un PAN), `account_id` enmascarado en respuestas, eventos públicos y logs; mensajes de error sin valores recibidos.
+
+Token de demo (HS256, `iss=prisma-nominations-demo`, `exp` obligatorio):
+
+```bash
+scripts/mint-token.sh ENT01                          # canal: write + read, 1 h
+scripts/mint-token.sh "" nominations:operate         # operador
+curl -H "Authorization: Bearer $(scripts/mint-token.sh ENT01)" http://localhost:8080/v1/nominations/<id>
+```
+
+La clave de demo está en `application.yml` y se sobreescribe con `NOMINATIONS_SECURITY_JWT_SECRET`. **En producción:** `issuer-uri`/JWKS del IdP corporativo (claves asimétricas rotables) validando también `aud`, mTLS en el gateway, rate limiting por entidad en el gateway.
+
+## Observabilidad
+
+Detalle completo, SLIs/SLOs e indicadores que anticipan degradación: [`docs/observability.md`](docs/observability.md). Runbook por alerta: [`docs/operations.md`](docs/operations.md).
+
+| Pilar | Implementación |
+|-------|----------------|
+| **Métricas** | Micrometer → `/actuator/prometheus`. De negocio vía el puerto `NominationMetrics` (la aplicación no depende de Micrometer): `nominations_received_total`, `nominations_resolved_total{status,reason}`, `nominations_resolution_time_seconds` (histograma end to end), `abm_submissions_total{outcome}`, `abm_responses_total{outcome}`, `nominations_abm_timeouts_total{source}`, `nominations_open{status}`, `outbox_pending` / `outbox_oldest_pending_age_seconds` / `outbox_failing`, `kafka_dlt_messages{topic}`. Más HTTP, Resilience4j, lag de consumers Kafka, Hikari y JVM. Nunca ids por operación como tag. |
+| **Trazas** | Micrometer Tracing + OpenTelemetry (W3C `traceparent`) exportando OTLP a Jaeger. Una sola traza de punta a punta, **también a través del outbox**: el `traceparent` se guarda con el evento y el relay lo continúa. |
+| **Logs** | `correlation_id` + `trace_id`/`span_id` en cada línea. JSON ECS con `SPRING_PROFILES_ACTIVE=json-logs`. Sin datos sensibles. |
+| **Correlación** | `correlation_id` (id de negocio estable: respuesta HTTP, historial, eventos) + `trace_id` (técnico: spans y logs). |
+| **Alertas** | 17 reglas Prometheus en [`ops/prometheus/alerts.yml`](ops/prometheus/alerts.yml), cada una con su runbook: circuit breaker abierto, tasa de ABM no disponible, outbox atrasado o fallando, mensajes en DLT, nominaciones trabadas, latencia p95, 5xx, lag de consumers, conflictos de ABM. |
+| **Tablero** | Grafana "Nominaciones – visión operativa" ([`ops/grafana/dashboards/nominations.json`](ops/grafana/dashboards/nominations.json)), provisionado automáticamente. |
+
 ## Estructura
 
 ```
@@ -289,9 +329,11 @@ cd app && mvn spring-boot:test-run
 cd app && mvn verify
 ```
 
-- API: http://localhost:8080
-- Health: http://localhost:8080/actuator/health
+- API: http://localhost:8080 (con token: ver [Seguridad](#seguridad)) · Swagger: http://localhost:8080/swagger-ui.html
+- Health: http://localhost:8080/actuator/health · Métricas: http://localhost:8080/actuator/prometheus
 - Kafka UI: http://localhost:8081
+- Grafana: http://localhost:3000 (admin/admin; si el puerto está ocupado: `GRAFANA_PORT=3001 docker compose up -d`)
+- Prometheus: http://localhost:9090 (alertas en `/alerts`) · Jaeger: http://localhost:16686
 
 ## API
 
@@ -302,11 +344,11 @@ Contrato completo: [`docs/openapi.yaml`](docs/openapi.yaml) · Swagger UI: http:
 | `POST` | `/v1/nominations` | **202** + `Location` + `Idempotent-Replayed: true\|false`. Body con `status: RECEIVED` |
 | `GET` | `/v1/nominations/{id}` | **200** estado actual (`account_id` y `card_id` enmascarados) |
 | `GET` | `/v1/nominations/{id}/history` | **200** transiciones en orden cronológico |
-| `POST` | `/internal/v1/nominations/{id}/reprocess` | **202** reproceso de una nominación en `ABM_TIMEOUT` (operador, sin `X-Entity-Id`; ver [Resiliencia](#resiliencia-e6)) |
+| `POST` | `/internal/v1/nominations/{id}/reprocess` | **202** reproceso de una nominación en `ABM_TIMEOUT` (scope `nominations:operate`; ver [Resiliencia](#resiliencia-e6)) |
 
 Headers:
 
-- `X-Entity-Id` (obligatorio): entidad que llama. Aísla los datos (otra entidad → 404) y forma parte de la clave de idempotencia `(entity_id, request_id)`. Transitorio: en la fase de seguridad sale del JWT.
+- `Authorization: Bearer <JWT>` (obligatorio): ver [Seguridad](#seguridad). La entidad sale del claim `entity_id`: aísla los datos (otra entidad → 404) y forma parte de la clave de idempotencia `(entity_id, request_id)`.
 - `X-Correlation-Id` (opcional): si falta o no cumple `[A-Za-z0-9._-]{1,64}` se genera. Vuelve siempre en la respuesta.
 - `Idempotent-Replayed` (respuesta del POST): `true` si se devolvió una nominación ya existente para el mismo `request_id`.
 
@@ -316,7 +358,9 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 |--------|------|--------|
 | `VALIDATION_ERROR` | 400 | Campos faltantes o inválidos; `card_id` con forma de PAN |
 | `MALFORMED_REQUEST` | 400 | Body que no es JSON válido o campo con tipo incorrecto (p.ej. `request_id` no UUID) |
-| `MISSING_HEADER` | 400 | Falta `X-Entity-Id` |
+| `MISSING_HEADER` | 400 | Falta un header obligatorio (la API pública ya no lo emite: la entidad sale del JWT) |
+| `UNAUTHORIZED` | 401 | Sin token, o token vencido, mal firmado o de otro emisor (`WWW-Authenticate: Bearer`) |
+| `FORBIDDEN` | 403 | Token válido sin el scope requerido o sin `entity_id` válido |
 | `INVALID_PARAMETER` | 400 | Parámetro de ruta con formato inválido (`{id}` no UUID) |
 | `BAD_REQUEST` | 400 | Otro 400 resuelto por Spring MVC |
 | `REQUEST_ERROR` | 4xx | Otro error de cliente sin código específico |
@@ -343,5 +387,5 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 - [x] Fase 4 — Outbox + Kafka
 - [x] Fase 5 — ABM mock + respuesta
 - [x] Fase 6 — Resiliencia
-- [ ] Fase 7 — Seguridad y observabilidad
+- [x] Fase 7 — Seguridad y observabilidad
 - [ ] Fase 8 — E2E y entrega

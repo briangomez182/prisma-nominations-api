@@ -3,11 +3,14 @@ package com.prisma.nominations.infrastructure.config;
 import com.prisma.nominations.application.exception.AbmContractException;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.infrastructure.adapter.in.messaging.InvalidEventException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.kafka.KafkaConnectionDetails;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -17,7 +20,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ContainerProperties.AckMode;
 import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.kafka.retrytopic.RetryTopicConfiguration;
@@ -76,13 +78,15 @@ public class AbmAdapterConsumerConfig implements DisposableBean {
 
     @Bean(ABM_ADAPTER_CONTAINER_FACTORY)
     ConcurrentKafkaListenerContainerFactory<String, String> abmAdapterContainerFactory(
-            KafkaProperties kafkaProperties, KafkaConnectionDetails connectionDetails, AbmAdapterProperties props) {
+            KafkaProperties kafkaProperties, KafkaConnectionDetails connectionDetails, AbmAdapterProperties props,
+            ObjectProvider<ObservationRegistry> observations, ObjectProvider<MeterRegistry> meters) {
 
         Map<String, Object> consumerProps = kafkaProperties.buildConsumerProperties(null);
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, connectionDetails.getConsumer().getBootstrapServers());
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, props.groupId());
         var consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps,
                 new StringDeserializer(), new StringDeserializer());
+        KafkaClientObservability.meter(consumerFactory, meters);
 
         var factory = new ConcurrentKafkaListenerContainerFactory<String, String>();
         factory.setConsumerFactory(consumerFactory);
@@ -90,6 +94,8 @@ public class AbmAdapterConsumerConfig implements DisposableBean {
         // abmAdapterRetryTopics. Commit por registro, después de procesarlo o reenviarlo (at-least-once). Una
         // reentrega la absorbe SubmitToAbmUseCase (solo envía si sigue en RECEIVED) y ABM es idempotente.
         factory.getContainerProperties().setAckMode(AckMode.RECORD);
+        // Aplica también a los containers de retry y DLT (usan esta misma factory).
+        KafkaClientObservability.observe(factory, KafkaClientObservability.observations(observations));
         return factory;
     }
 
@@ -97,12 +103,15 @@ public class AbmAdapterConsumerConfig implements DisposableBean {
     RetryTopicConfiguration abmAdapterRetryTopics(AbmAdapterProperties props,
                                                   KafkaTopicsConfig.TopicsProperties topics,
                                                   KafkaProperties kafkaProperties,
-                                                  KafkaConnectionDetails connectionDetails) {
+                                                  KafkaConnectionDetails connectionDetails,
+                                                  ObjectProvider<ObservationRegistry> observations,
+                                                  ObjectProvider<MeterRegistry> meters) {
         // Producer propio con String explícito: el retry y el DLT reciben el payload original byte a byte.
         Map<String, Object> producerProps = kafkaProperties.buildProducerProperties(null);
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, connectionDetails.getProducer().getBootstrapServers());
         retryProducerFactory = new DefaultKafkaProducerFactory<>(producerProps,
                 new StringSerializer(), new StringSerializer());
+        KafkaClientObservability.meter(retryProducerFactory, meters);
 
         return RetryTopicConfigurationBuilder.newInstance()
                 .includeTopic(KafkaTopics.NOMINATION_REQUESTED)
@@ -118,7 +127,9 @@ public class AbmAdapterConsumerConfig implements DisposableBean {
                 .dltHandlerMethod(DLT_HANDLER_BEAN, DLT_HANDLER_METHOD)
                 .dltProcessingFailureStrategy(DltStrategy.FAIL_ON_ERROR)
                 .autoCreateTopics(true, topics.partitions(), topics.replicationFactor())
-                .create(new KafkaTemplate<>(retryProducerFactory));
+                // Con observation: el reenvío lleva un traceparent nuevo de la misma traza.
+                .create(KafkaClientObservability.observedTemplate(retryProducerFactory,
+                        KafkaClientObservability.observations(observations)));
     }
 
     @Override

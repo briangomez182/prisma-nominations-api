@@ -32,6 +32,7 @@ entrada `abm.responses.v1`, cuyo contrato fija ABM.
 | **Header `event_type`** | `nomination.requested` o `nomination.result`. |
 | **Header `schema_version`** | Versión del payload dentro del tópico, como texto (`"1"`). |
 | **Header `correlation_id`** | El de la request HTTP original (`X-Correlation-Id`), para trazar de punta a punta (D13). |
+| **Header `traceparent`** | Opcional. Contexto de traza [W3C Trace Context](https://www.w3.org/TR/trace-context/) (`00-<trace-id 32 hex>-<span-id 16 hex>-<flags>`). Ver [Trazas distribuidas](#trazas-distribuidas-traceparent). |
 
 Los headers repiten `event_id`, `event_type` y `schema_version` del payload para poder enrutar o deduplicar sin
 parsear el cuerpo. Si un header falta, el consumidor usa el campo del payload.
@@ -129,6 +130,7 @@ publica ABM, no este servicio: los nombres de campos son los de ABM. Lo consume 
 | **Key** | `nomination_id` |
 | **Value** | JSON UTF-8, `snake_case` |
 | **Header `correlation_id`** | El que viajó en el pedido. Si falta, se usa el del payload. |
+| **Header `traceparent`** | Opcional (W3C). Si ABM lo propaga desde el `traceparent` del POST, la respuesta continúa la traza; el simulador lo hace. |
 
 No trae `event_id`: la deduplicación la da la máquina de estados (D9, ver abajo).
 
@@ -173,6 +175,32 @@ No trae `event_id`: la deduplicación la da la máquina de estados (D9, ver abaj
 WARN). Dos respuestas simultáneas: la segunda pierde por lock optimista o por el índice único de `nomination.result`
 en el outbox, y se reevalúa como `DUPLICATE`. Una respuesta puede llegar antes de que el adapter confirme el envío:
 `RECEIVED → APPROVED/REJECTED` directo es válido.
+
+## Trazas distribuidas (`traceparent`)
+
+`correlation_id` y `traceparent` se complementan:
+
+| | `correlation_id` | `traceparent` |
+|---|---|---|
+| Qué es | Id de **negocio**, estable, elegido por el canal (`X-Correlation-Id`) | Contexto **técnico** W3C: trace id + span del emisor |
+| Dónde queda | Respuesta HTTP, base (historial, outbox), payload y headers Kafka, MDC `correlationId` | Headers HTTP/Kafka, JSON de headers del outbox, MDC `traceId`/`spanId`, backend de trazas (Jaeger) |
+| Para qué | Buscar una operación en logs y en la base, también días después | Ver la operación como un árbol de spans con latencias por tramo |
+
+- **Outbox:** al hacer append, si hay un span activo, el JSON de la columna `headers` incluye `"traceparent"` (además
+  de `event_id`, `event_type`, `schema_version` y `correlation_id`). Sin span activo (job sin traza, tracing
+  apagado) la clave no está.
+- **Relay:** publica dentro de un span `outbox.relay` hijo de ese contexto, aunque corra en otro hilo y más tarde.
+  El productor (observation de Spring Kafka) agrega su propio span PRODUCER y escribe en el mensaje un
+  `traceparent` nuevo de la **misma traza** (mismo trace id, span id del productor). Filas sin traceparent se
+  publican igual, con una traza nueva.
+- **Consumidores** de este servicio: abren un span CONSUMER hijo del `traceparent` del mensaje; los reenvíos a
+  tópicos de retry y DLT conservan la traza. El header es **opcional**: un consumidor externo puede ignorarlo, y
+  un mensaje sin él se procesa normal (traza nueva).
+- No se persiste baggage ni `tracestate`.
+
+Recorrido: `HTTP POST (span server)` → `outbox.headers.traceparent` → `outbox.relay` → `nomination.requested.v1`
+→ ABM Adapter (consumer) → `POST ABM` (traceparent HTTP) → `abm.responses.v1` → consumer de respuestas →
+`nomination.result.v1` → consumidores. Un solo trace id de punta a punta; `correlation_id` en cada tramo.
 
 ## Garantías de entrega
 

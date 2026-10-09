@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.prisma.nominations.application.event.IntegrationEvent;
 import com.prisma.nominations.application.port.out.OutboxPort;
 import com.prisma.nominations.infrastructure.config.KafkaTopics;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -15,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Escritura del outbox con JDBC: es un INSERT sin lectura ni ciclo de vida, y el relay lee la misma
@@ -35,10 +41,16 @@ class OutboxPersistenceAdapter implements OutboxPort {
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
-    OutboxPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper) {
+    /** Tracer y Propagator opcionales: sin tracing (p.ej. {@code management.tracing.enabled=false}) son no-op. */
+    OutboxPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper, ObjectProvider<Tracer> tracer,
+                             ObjectProvider<Propagator> propagator) {
         this.jdbc = jdbc;
         this.mapper = mapper;
+        this.tracer = tracer.getIfUnique(() -> Tracer.NOOP);
+        this.propagator = propagator.getIfUnique(() -> Propagator.NOOP);
     }
 
     /**
@@ -76,7 +88,22 @@ class OutboxPersistenceAdapter implements OutboxPort {
         headers.put(KafkaTopics.HEADER_EVENT_TYPE, event.eventType());
         headers.put(KafkaTopics.HEADER_SCHEMA_VERSION, String.valueOf(event.schemaVersion()));
         headers.put(KafkaTopics.HEADER_CORRELATION_ID, event.correlationId());
+        traceparent().ifPresent(value -> headers.put(KafkaTopics.HEADER_TRACEPARENT, value));
         return write(headers);
+    }
+
+    /**
+     * Contexto de traza actual en formato W3C, para que el relay (otro hilo, más tarde) publique como hijo de esta
+     * traza. Solo {@code traceparent}: el baggage no se persiste. Sin span activo no se agrega.
+     */
+    private Optional<String> traceparent() {
+        TraceContext context = tracer.currentTraceContext().context();
+        if (context == null) {
+            return Optional.empty();
+        }
+        Map<String, String> carrier = new LinkedHashMap<>();
+        propagator.inject(context, carrier, Map::put);
+        return Optional.ofNullable(carrier.get(KafkaTopics.HEADER_TRACEPARENT));
     }
 
     private String write(Object value) {

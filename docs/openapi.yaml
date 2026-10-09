@@ -6,7 +6,9 @@ info:
 
     **Flujo asincrónico**: `POST /v1/nominations` persiste la nominación en estado `RECEIVED` junto con el pedido a ABM (outbox) y responde **202 Accepted** con `Location`. ABM resuelve en minutos; el estado se consulta por `GET` (o llega por el evento `nomination.result.v1`).
 
-    **Idempotencia**: la clave es `(X-Entity-Id, request_id)`. Repetir el mismo POST devuelve la nominación original con `Idempotent-Replayed: true`; reutilizar el `request_id` con otro contenido devuelve 409.
+    **Seguridad**: OAuth2 bearer JWT. La entidad financiera sale del claim `entity_id` del token (nunca de un header o del body) y cada operación exige un scope: `nominations:write` (alta), `nominations:read` (consultas) y `nominations:operate` (endpoints internos). Sin token o con token inválido → **401**; sin el scope o sin `entity_id` válido → **403**. En la demo el token se genera con `scripts/mint-token.sh`.
+
+    **Idempotencia**: la clave es `(entity_id, request_id)`. Repetir el mismo POST devuelve la nominación original con `Idempotent-Replayed: true`; reutilizar el `request_id` con otro contenido devuelve 409.
 
     **Errores**: RFC 9457 (`application/problem+json`) con `code` estable, `correlation_id`, `timestamp` y `errors[]` por campo.
 
@@ -29,10 +31,9 @@ paths:
       description: |-
         Persiste la nominación en `RECEIVED` y encola el pedido a ABM. Responde **202** sin esperar a ABM; el estado se consulta en `Location`.
 
-        Idempotente por `(X-Entity-Id, request_id)`: repetir el mismo POST devuelve la misma nominación (**202** con `Idempotent-Replayed: true`, sin crear ni reenviar nada). El mismo `request_id` con otro contenido devuelve **409**.
+        Idempotente por `(entity_id del token, request_id)`: repetir el mismo POST devuelve la misma nominación (**202** con `Idempotent-Replayed: true`, sin crear ni reenviar nada). El mismo `request_id` con otro contenido devuelve **409**.
       operationId: create
       parameters:
-      - $ref: "#/components/parameters/X-Entity-Id"
       - $ref: "#/components/parameters/X-Correlation-Id"
       requestBody:
         content:
@@ -89,8 +90,7 @@ paths:
                     updated_at: 2026-10-08T12:00:00Z
         "400":
           description: "`VALIDATION_ERROR` (campos faltantes o inválidos, card_id\
-            \ con forma de PAN), `MALFORMED_REQUEST` (JSON inválido o tipo incorrecto)\
-            \ o `MISSING_HEADER` (falta X-Entity-Id)"
+            \ con forma de PAN), o `MALFORMED_REQUEST` (JSON inválido o tipo incorrecto)"
           headers:
             X-Correlation-Id:
               $ref: "#/components/headers/X-Correlation-Id"
@@ -129,17 +129,6 @@ paths:
                     errors:
                     - field: request_id
                       message: Tipo o formato inválido
-                MISSING_HEADER:
-                  description: MISSING_HEADER
-                  value:
-                    type: https://api.prisma.example/problems/missing-header
-                    title: Header obligatorio ausente
-                    status: 400
-                    detail: Falta el header obligatorio X-Entity-Id
-                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
-                    code: MISSING_HEADER
-                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
-                    timestamp: 2026-10-08T12:00:00Z
         "409":
           description: "`IDEMPOTENCY_CONFLICT`: el request_id ya fue usado por la\
             \ entidad con otro contenido"
@@ -162,6 +151,14 @@ paths:
                     code: IDEMPOTENCY_CONFLICT
                     correlation_id: c0ffee00-1234-4abc-9def-000000000001
                     timestamp: 2026-10-08T12:00:00Z
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+      - bearer-jwt:
+        - nominations:write
+      x-required-scope: nominations:write
   /internal/v1/nominations/{nominationId}/reprocess:
     post:
       tags:
@@ -172,7 +169,7 @@ paths:
 
         Solo desde `ABM_TIMEOUT`; desde cualquier otro estado responde **409** sin cambios. ABM es idempotente por `nomination_id`: si el pedido original sí había llegado, no se crea otro alta.
 
-        **Uso interno**: requiere rol de operador (fase de seguridad); no usa `X-Entity-Id`.
+        **Uso interno**: requiere el scope `nominations:operate`; no está acotado a una entidad.
       operationId: reprocess
       parameters:
       - $ref: "#/components/parameters/X-Correlation-Id"
@@ -291,6 +288,14 @@ paths:
                     code: CONCURRENT_MODIFICATION
                     correlation_id: c0ffee00-1234-4abc-9def-000000000001
                     timestamp: 2026-10-08T12:00:00Z
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+      - bearer-jwt:
+        - nominations:operate
+      x-required-scope: nominations:operate
   /v1/nominations/{nominationId}:
     get:
       tags:
@@ -300,7 +305,6 @@ paths:
         entidad responden 404.
       operationId: get
       parameters:
-      - $ref: "#/components/parameters/X-Entity-Id"
       - $ref: "#/components/parameters/X-Correlation-Id"
       - name: nominationId
         in: path
@@ -334,8 +338,7 @@ paths:
                     created_at: 2026-10-08T12:00:00Z
                     updated_at: 2026-10-08T12:00:00Z
         "400":
-          description: '`MISSING_HEADER` o `INVALID_PARAMETER` (nomination_id no es
-            UUID)'
+          description: '`INVALID_PARAMETER` (nomination_id no es UUID)'
           headers:
             X-Correlation-Id:
               $ref: "#/components/headers/X-Correlation-Id"
@@ -344,17 +347,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
               examples:
-                MISSING_HEADER:
-                  description: MISSING_HEADER
-                  value:
-                    type: https://api.prisma.example/problems/missing-header
-                    title: Header obligatorio ausente
-                    status: 400
-                    detail: Falta el header obligatorio X-Entity-Id
-                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
-                    code: MISSING_HEADER
-                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
-                    timestamp: 2026-10-08T12:00:00Z
                 INVALID_PARAMETER:
                   description: INVALID_PARAMETER
                   value:
@@ -390,6 +382,14 @@ paths:
                     code: NOMINATION_NOT_FOUND
                     correlation_id: c0ffee00-1234-4abc-9def-000000000001
                     timestamp: 2026-10-08T12:00:00Z
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+      - bearer-jwt:
+        - nominations:read
+      x-required-scope: nominations:read
   /v1/nominations/{nominationId}/history:
     get:
       tags:
@@ -399,7 +399,6 @@ paths:
         \ (auditoría)."
       operationId: history
       parameters:
-      - $ref: "#/components/parameters/X-Entity-Id"
       - $ref: "#/components/parameters/X-Correlation-Id"
       - name: nominationId
         in: path
@@ -429,8 +428,7 @@ paths:
                       correlation_id: c0ffee00-1234-4abc-9def-000000000001
                       occurred_at: 2026-10-08T12:00:00Z
         "400":
-          description: '`MISSING_HEADER` o `INVALID_PARAMETER` (nomination_id no es
-            UUID)'
+          description: '`INVALID_PARAMETER` (nomination_id no es UUID)'
           headers:
             X-Correlation-Id:
               $ref: "#/components/headers/X-Correlation-Id"
@@ -439,17 +437,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetail"
               examples:
-                MISSING_HEADER:
-                  description: MISSING_HEADER
-                  value:
-                    type: https://api.prisma.example/problems/missing-header
-                    title: Header obligatorio ausente
-                    status: 400
-                    detail: Falta el header obligatorio X-Entity-Id
-                    instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
-                    code: MISSING_HEADER
-                    correlation_id: c0ffee00-1234-4abc-9def-000000000001
-                    timestamp: 2026-10-08T12:00:00Z
                 INVALID_PARAMETER:
                   description: INVALID_PARAMETER
                   value:
@@ -485,6 +472,14 @@ paths:
                     code: NOMINATION_NOT_FOUND
                     correlation_id: c0ffee00-1234-4abc-9def-000000000001
                     timestamp: 2026-10-08T12:00:00Z
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+      - bearer-jwt:
+        - nominations:read
+      x-required-scope: nominations:read
 components:
   schemas:
     ProblemDetail:
@@ -520,6 +515,8 @@ components:
           - MISSING_HEADER
           - INVALID_PARAMETER
           - BAD_REQUEST
+          - UNAUTHORIZED
+          - FORBIDDEN
           - NOMINATION_NOT_FOUND
           - RESOURCE_NOT_FOUND
           - METHOD_NOT_ALLOWED
@@ -684,18 +681,59 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NominationHistoryItem"
+  responses:
+    Unauthorized:
+      description: "`UNAUTHORIZED`: falta el token o es inválido (firma, vencimiento,\
+        \ issuer)"
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/X-Correlation-Id"
+        WWW-Authenticate:
+          description: "Desafío RFC 6750: `Bearer` o `Bearer error=\"invalid_token\"\
+            ` (sin el motivo)"
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          examples:
+            UNAUTHORIZED:
+              value:
+                type: https://api.prisma.example/problems/unauthorized
+                title: No autenticado
+                status: 401
+                detail: Se requiere un token de acceso válido
+                instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                code: UNAUTHORIZED
+                correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                timestamp: 2026-10-08T12:00:00Z
+    Forbidden:
+      description: "`FORBIDDEN`: el token no tiene el scope requerido o no trae un\
+        \ `entity_id` válido"
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/X-Correlation-Id"
+        WWW-Authenticate:
+          description: "Desafío RFC 6750: `Bearer error=\"insufficient_scope\"`"
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          examples:
+            FORBIDDEN:
+              value:
+                type: https://api.prisma.example/problems/forbidden
+                title: Acceso denegado
+                status: 403
+                detail: El token no tiene permisos para esta operación
+                instance: urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001
+                code: FORBIDDEN
+                correlation_id: c0ffee00-1234-4abc-9def-000000000001
+                timestamp: 2026-10-08T12:00:00Z
   parameters:
-    X-Entity-Id:
-      name: X-Entity-Id
-      in: header
-      description: "Entidad financiera que llama. Aísla las nominaciones por entidad\
-        \ y forma parte de la clave de idempotencia. **Transitorio**: en la fase de\
-        \ seguridad sale del JWT."
-      required: true
-      schema:
-        type: string
-        example: ENT01
-        maxLength: 20
     X-Correlation-Id:
       name: X-Correlation-Id
       in: header
@@ -712,3 +750,14 @@ components:
       schema:
         type: string
         example: c0ffee00-1234-4abc-9def-000000000001
+  securitySchemes:
+    bearer-jwt:
+      type: http
+      description: "JWT emitido por el IdP (OAuth2 client credentials). Claims: `sub`\
+        \ (client id del canal), `entity_id` (entidad financiera, `[A-Za-z0-9_-]{1,20}`,\
+        \ obligatorio en /v1), `scope` (separados por espacio: `nominations:write`,\
+        \ `nominations:read`, `nominations:operate`), `iss` y `exp` (obligatorios).\
+        \ Demo: HS256 con la clave de demo, generado con `scripts/mint-token.sh`.\
+        \ Producción: firma asimétrica validada contra el JWKS del IdP corporativo."
+      scheme: bearer
+      bearerFormat: JWT

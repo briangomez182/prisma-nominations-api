@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prisma.nominations.abmmock.AbmMockMessages.Response;
 import com.prisma.nominations.abmmock.AbmMockMessages.SubmitRequest;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -48,6 +49,7 @@ public class AbmMockEngine implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AbmMockEngine.class);
     private static final String MDC_CORRELATION_ID = "correlationId";
+    private static final ContextSnapshotFactory CONTEXT_SNAPSHOTS = ContextSnapshotFactory.builder().build();
 
     private final AbmMockProperties properties;
     private final AbmResponsePublisher publisher;
@@ -119,7 +121,7 @@ public class AbmMockEngine implements AutoCloseable {
     private void scheduleResponse(SubmitRequest request, Operation operation) {
         switch (operation.scenario()) {
             case SILENT -> log.info("ABM mock: operación {} nunca va a responder (SILENT)", operation.abmOperationId());
-            default -> scheduler.schedule(() -> respond(request, operation),
+            default -> scheduler.schedule(withCurrentContext(() -> respond(request, operation)),
                     properties.responseDelay().toMillis(), TimeUnit.MILLISECONDS);
         }
     }
@@ -136,7 +138,7 @@ public class AbmMockEngine implements AutoCloseable {
         }
         publish(request, operation, response, json);
         if (operation.scenario() == AbmMockScenario.DUPLICATE) {
-            scheduler.schedule(() -> publish(request, operation, response, json),
+            scheduler.schedule(withCurrentContext(() -> publish(request, operation, response, json)),
                     properties.duplicateGap().toMillis(), TimeUnit.MILLISECONDS);
         }
     }
@@ -194,6 +196,14 @@ public class AbmMockEngine implements AutoCloseable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * La respuesta sale de otro hilo, segundos después: se lleva el contexto actual (observation/traza del pedido
+     * HTTP) para que la publicación en Kafka continúe la misma traza. Sin tracing es no-op.
+     */
+    private static Runnable withCurrentContext(Runnable task) {
+        return CONTEXT_SNAPSHOTS.captureAll().wrap(task);
     }
 
     private static ThreadFactory namedThreads() {

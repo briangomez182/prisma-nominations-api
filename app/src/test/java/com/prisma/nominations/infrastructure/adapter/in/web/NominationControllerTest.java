@@ -1,5 +1,6 @@
 package com.prisma.nominations.infrastructure.adapter.in.web;
 
+import com.prisma.nominations.TestTokens;
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
 import com.prisma.nominations.application.port.in.CreateNominationResult;
 import com.prisma.nominations.application.port.in.CreateNominationUseCase;
@@ -11,10 +12,12 @@ import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.NominationStatus;
 import com.prisma.nominations.domain.RejectionReason;
 import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.infrastructure.config.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,11 +34,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/** Con la configuración de seguridad real; el JWT lo simula {@code jwt()} de spring-security-test. */
 @WebMvcTest(NominationController.class)
+@Import(SecurityConfig.class)
 class NominationControllerTest {
 
     private static final String ENTITY = "ENT01";
@@ -68,7 +74,7 @@ class NominationControllerTest {
         when(createNomination.create(any())).thenReturn(new CreateNominationResult(received(), false));
 
         mockMvc.perform(post("/v1/nominations")
-                        .header(ApiHeaders.ENTITY_ID, ENTITY)
+                        .with(TestTokens.jwt(ENTITY, TestTokens.WRITE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
                 .andExpect(status().isAccepted())
@@ -92,7 +98,7 @@ class NominationControllerTest {
         when(createNomination.create(any())).thenReturn(new CreateNominationResult(received(), true));
 
         mockMvc.perform(post("/v1/nominations")
-                        .header(ApiHeaders.ENTITY_ID, ENTITY)
+                        .with(TestTokens.jwt(ENTITY, TestTokens.WRITE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
                 .andExpect(status().isAccepted())
@@ -102,11 +108,11 @@ class NominationControllerTest {
     }
 
     @Test
-    void postPassesEntityFromHeaderAndFullDataToUseCase() throws Exception {
+    void postPassesEntityFromTokenAndFullDataToUseCase() throws Exception {
         when(createNomination.create(any())).thenReturn(new CreateNominationResult(received(), false));
 
         mockMvc.perform(post("/v1/nominations")
-                        .header(ApiHeaders.ENTITY_ID, ENTITY)
+                        .with(TestTokens.jwt(ENTITY, TestTokens.WRITE))
                         .header(ApiHeaders.CORRELATION_ID, "corr-from-channel")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
@@ -128,7 +134,7 @@ class NominationControllerTest {
     @Test
     void postWithoutRequiredFieldsReturns400AndDoesNotCallUseCase() throws Exception {
         mockMvc.perform(post("/v1/nominations")
-                        .header(ApiHeaders.ENTITY_ID, ENTITY)
+                        .with(TestTokens.jwt(ENTITY, TestTokens.WRITE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"alias\": \"CUENTA\"}"))
                 .andExpect(status().isBadRequest());
@@ -141,7 +147,7 @@ class NominationControllerTest {
         var body = VALID_BODY.replace("0001234567890987654", "A".repeat(35));
 
         mockMvc.perform(post("/v1/nominations")
-                        .header(ApiHeaders.ENTITY_ID, ENTITY)
+                        .with(TestTokens.jwt(ENTITY, TestTokens.WRITE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest());
@@ -150,20 +156,68 @@ class NominationControllerTest {
     }
 
     @Test
-    void postWithoutEntityHeaderReturns400() throws Exception {
+    void postWithoutTokenReturns401ProblemAndDoesNotCallUseCase() throws Exception {
         mockMvc.perform(post("/v1/nominations")
+                        .header(ApiHeaders.CORRELATION_ID, "corr-anon")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", "Bearer"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.correlation_id").value("corr-anon"));
 
         verify(createNomination, never()).create(any());
+    }
+
+    @Test
+    void postWithTokenWithoutEntityReturns403AndDoesNotCallUseCase() throws Exception {
+        mockMvc.perform(post("/v1/nominations")
+                        .with(TestTokens.jwt(null, TestTokens.WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        verify(createNomination, never()).create(any());
+    }
+
+    @Test
+    void postWithInvalidEntityClaimReturns403() throws Exception {
+        mockMvc.perform(post("/v1/nominations")
+                        .with(TestTokens.jwt("ENT 01;drop", TestTokens.WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isForbidden());
+
+        verify(createNomination, never()).create(any());
+    }
+
+    @Test
+    void postWithReadOnlyScopeReturns403() throws Exception {
+        mockMvc.perform(post("/v1/nominations")
+                        .with(TestTokens.jwt(ENTITY, TestTokens.READ))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("WWW-Authenticate", "Bearer error=\"insufficient_scope\""));
+
+        verify(createNomination, never()).create(any());
+    }
+
+    @Test
+    void getWithWriteOnlyScopeReturns403() throws Exception {
+        mockMvc.perform(get("/v1/nominations/{id}", NOMINATION_ID).with(TestTokens.jwt(ENTITY, TestTokens.WRITE)))
+                .andExpect(status().isForbidden());
+
+        verify(getNomination, never()).get(any(), any());
     }
 
     @Test
     void getReturnsMaskedNominationWithRejectionReasonButNoAbmCode() throws Exception {
         when(getNomination.get(ENTITY, NOMINATION_ID)).thenReturn(rejected());
 
-        mockMvc.perform(get("/v1/nominations/{id}", NOMINATION_ID).header(ApiHeaders.ENTITY_ID, ENTITY))
+        mockMvc.perform(get("/v1/nominations/{id}", NOMINATION_ID).with(TestTokens.jwt(ENTITY, TestTokens.READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nomination_id").value(NOMINATION_ID.toString()))
                 .andExpect(jsonPath("$.status").value("REJECTED"))
@@ -183,7 +237,7 @@ class NominationControllerTest {
                 new StatusChange(NOMINATION_ID, NominationStatus.RECEIVED, NominationStatus.PENDING_ABM,
                         ChangeSource.ABM_ADAPTER, "Enviada a ABM", "corr-1", UPDATED)));
 
-        mockMvc.perform(get("/v1/nominations/{id}/history", NOMINATION_ID).header(ApiHeaders.ENTITY_ID, ENTITY))
+        mockMvc.perform(get("/v1/nominations/{id}/history", NOMINATION_ID).with(TestTokens.jwt(ENTITY, TestTokens.READ)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nomination_id").value(NOMINATION_ID.toString()))
                 .andExpect(jsonPath("$.items", hasSize(2)))

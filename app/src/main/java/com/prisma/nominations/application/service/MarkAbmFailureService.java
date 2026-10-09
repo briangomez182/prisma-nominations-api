@@ -2,6 +2,7 @@ package com.prisma.nominations.application.service;
 
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.application.port.in.MarkAbmFailureUseCase;
+import com.prisma.nominations.application.port.out.NominationMetrics;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.domain.ChangeSource;
 import com.prisma.nominations.domain.NominationStatus;
@@ -32,21 +33,29 @@ class MarkAbmFailureService implements MarkAbmFailureUseCase {
     private final NominationRepository repository;
     private final TransactionOperations transactions;
     private final Clock clock;
+    private final NominationMetrics metrics;
 
-    MarkAbmFailureService(NominationRepository repository, TransactionOperations transactions, Clock clock) {
+    MarkAbmFailureService(NominationRepository repository, TransactionOperations transactions, Clock clock,
+                          NominationMetrics metrics) {
         this.repository = repository;
         this.transactions = transactions;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Override
     public boolean markFailed(UUID nominationId, String detail) {
+        boolean timedOut;
         try {
-            return apply(nominationId, detail);
+            timedOut = apply(nominationId, detail);
         } catch (OptimisticLockingFailureException race) {
             log.debug("Lock optimista al marcar ABM_TIMEOUT nomination_id={}: se reevalúa", nominationId);
-            return apply(nominationId, detail);
+            timedOut = apply(nominationId, detail);
         }
+        if (timedOut) {
+            metrics.abmTimeout(ChangeSource.ABM_ADAPTER);
+        }
+        return timedOut;
     }
 
     private boolean apply(UUID nominationId, String detail) {

@@ -24,6 +24,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -235,6 +236,7 @@ class AbmResilienceIntegrationTest {
             String operatorCorrelationId = "it-reprocess-" + UUID.randomUUID();
             ResponseEntity<String> reprocess = http().post()
                     .uri("/internal/v1/nominations/{id}/reprocess", created.nominationId())
+                    .header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer())
                     .header(ApiHeaders.CORRELATION_ID, operatorCorrelationId)
                     .retrieve()
                     .toEntity(String.class);
@@ -315,6 +317,7 @@ class AbmResilienceIntegrationTest {
             assertThat(circuitBreakerHealth().path("state").asText()).isEqualTo("HALF_OPEN");
             ResponseEntity<String> reprocess = http().post()
                     .uri("/internal/v1/nominations/{id}/reprocess", healthy.nominationId())
+                    .header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer())
                     .retrieve()
                     .toEntity(String.class);
             assertThat(reprocess.getStatusCode().value()).isEqualTo(202);
@@ -375,7 +378,7 @@ class AbmResilienceIntegrationTest {
                 }
                 """.formatted(UUID.randomUUID(), ACCOUNT_ID, cardId);
         ResponseEntity<String> response = http().post().uri("/v1/nominations")
-                .header(ApiHeaders.ENTITY_ID, entity)
+                .header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity))
                 .header(ApiHeaders.CORRELATION_ID, correlationId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
@@ -392,7 +395,7 @@ class AbmResilienceIntegrationTest {
 
     private JsonNode nomination(Created created) throws Exception {
         return objectMapper.readTree(http().get().uri("/v1/nominations/" + created.nominationId())
-                .header(ApiHeaders.ENTITY_ID, created.entity()).retrieve().body(String.class));
+                .header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(created.entity())).retrieve().body(String.class));
     }
 
     /** Espera el estado por la API pública (GET) y devuelve la última representación leída. */
@@ -436,9 +439,10 @@ class AbmResilienceIntegrationTest {
         return circuitBreakers.circuitBreaker("abm");
     }
 
-    /** components.circuitBreakers.details.abm.details de /actuator/health (lo que vería un operador). */
+    /** components.circuitBreakers.details.abm.details de /actuator/health (el detalle requiere token de operador). */
     private JsonNode circuitBreakerHealth() throws Exception {
-        String body = http().get().uri("/actuator/health").retrieve().body(String.class);
+        String body = http().get().uri("/actuator/health")
+                .header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer()).retrieve().body(String.class);
         return objectMapper.readTree(body).at("/components/circuitBreakers/details/abm/details");
     }
 

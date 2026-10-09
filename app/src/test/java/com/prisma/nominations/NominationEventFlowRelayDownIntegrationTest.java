@@ -1,13 +1,13 @@
 package com.prisma.nominations;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.prisma.nominations.infrastructure.adapter.in.web.ApiHeaders;
 import com.prisma.nominations.infrastructure.adapter.out.messaging.OutboxRelay;
 import com.prisma.nominations.infrastructure.config.KafkaTopics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -63,7 +63,7 @@ class NominationEventFlowRelayDownIntegrationTest {
 
             // La nominación existe y su evento quedó pendiente en el outbox (misma TX), sin llegar a Kafka.
             mockMvc.perform(get(NominationEventFlowIntegrationTest.BASE + "/" + first)
-                            .header(ApiHeaders.ENTITY_ID, entity))
+                            .header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("RECEIVED"));
             assertPending(first);

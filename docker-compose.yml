@@ -1,5 +1,8 @@
-# Infraestructura local para desarrollo: PostgreSQL + Kafka (KRaft, sin ZooKeeper) + Kafka UI.
+# Infraestructura local para desarrollo: PostgreSQL + Kafka (KRaft, sin ZooKeeper) + Kafka UI
+# y el stack de observabilidad: Jaeger (trazas OTLP), Prometheus (métricas + alertas) y Grafana (tableros).
 # La app corre fuera de Docker (mvn spring-boot:run). En la fase 8 se agrega el servicio de la app.
+# URLs: Grafana http://localhost:3000 (admin/admin) · Prometheus http://localhost:9090
+#       Jaeger http://localhost:16686 · Kafka UI http://localhost:8081 — ver docs/observability.md
 services:
   postgres:
     image: postgres:16-alpine
@@ -52,5 +55,52 @@ services:
       kafka:
         condition: service_healthy
 
+  # Trazas: la app exporta OTLP HTTP a http://localhost:4318/v1/traces. Almacenamiento en memoria (demo).
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "50000"
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+
+  # Métricas y alertas: scrapea /actuator/prometheus de la app que corre en el host.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle          # POST /-/reload para recargar config y reglas sin reiniciar
+    volumes:
+      - ./ops/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux; en Docker Desktop ya existe
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin          # solo demo
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/nominations.json
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"   # si el 3000 está ocupado: GRAFANA_PORT=3001 docker compose up -d
+    depends_on:
+      - prometheus
+
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:

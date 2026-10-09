@@ -1,6 +1,7 @@
 package com.prisma.nominations.application.service;
 
 import com.prisma.nominations.application.port.in.SweepStaleNominationsUseCase;
+import com.prisma.nominations.application.port.out.NominationMetrics;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.domain.ChangeSource;
 import com.prisma.nominations.domain.NominationStatus;
@@ -38,9 +39,10 @@ public class SweepStaleNominationsService implements SweepStaleNominationsUseCas
     private final Clock clock;
     private final Duration responseSla;
     private final int batchSize;
+    private final NominationMetrics metrics;
 
     public SweepStaleNominationsService(NominationRepository repository, TransactionOperations transactions,
-                                        Clock clock, Duration responseSla, int batchSize) {
+                                        Clock clock, Duration responseSla, int batchSize, NominationMetrics metrics) {
         if (responseSla == null || responseSla.isNegative() || responseSla.isZero()) {
             throw new IllegalArgumentException("responseSla debe ser positivo");
         }
@@ -52,6 +54,7 @@ public class SweepStaleNominationsService implements SweepStaleNominationsUseCas
         this.clock = Objects.requireNonNull(clock);
         this.responseSla = responseSla;
         this.batchSize = batchSize;
+        this.metrics = Objects.requireNonNull(metrics);
     }
 
     @Override
@@ -66,6 +69,7 @@ public class SweepStaleNominationsService implements SweepStaleNominationsUseCas
             try {
                 if (timeOut(id)) {
                     timedOut++;
+                    metrics.abmTimeout(ChangeSource.SWEEPER);
                 }
             } catch (OptimisticLockingFailureException race) {
                 // ABM (u otra instancia del sweeper) cambió la nominación entre la relectura y el commit: gana ella.
@@ -89,7 +93,7 @@ public class SweepStaleNominationsService implements SweepStaleNominationsUseCas
             nomination.markTimedOut(ChangeSource.SWEEPER, "Sin respuesta de ABM dentro del SLA (" + responseSla + ")",
                     clock.instant());
             repository.save(nomination);
-            // Alerta operativa: la métrica llega con la fase de observabilidad.
+            // Alerta operativa: nominations_abm_timeouts_total{source="SWEEPER"} (se cuenta tras el commit).
             log.warn("Sweeper: nomination_id={} sin respuesta de ABM desde {} (SLA {}): PENDING_ABM -> ABM_TIMEOUT",
                     id, pendingSince, responseSla);
             return true;

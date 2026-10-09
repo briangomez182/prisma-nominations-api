@@ -30,8 +30,9 @@ class ReprocessNominationServiceTest {
 
     private final InMemoryNominationRepository repository = InMemoryNominationRepository.withOptimisticLocking();
     private final FakeOutbox outbox = new FakeOutbox();
+    private final RecordingNominationMetrics metrics = new RecordingNominationMetrics();
     private final ReprocessNominationService service = new ReprocessNominationService(repository, outbox,
-            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC));
+            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), metrics);
 
     @Test
     void timedOutGoesBackToReceivedAndEnqueuesANewAbmRequest() {
@@ -53,6 +54,7 @@ class ReprocessNominationServiceTest {
             assertThat(change.to()).isEqualTo(RECEIVED);
             assertThat(change.source()).isEqualTo(ChangeSource.OPERATOR);
         });
+        assertThat(metrics.calls).containsExactly("reprocessed");
     }
 
     @Test
@@ -66,6 +68,7 @@ class ReprocessNominationServiceTest {
         assertThat(repository.findById(nomination.id()).orElseThrow().status()).isEqualTo(PENDING_ABM);
         assertThat(repository.saves).isEqualTo(saves);
         assertThat(outbox.events).isEmpty();
+        assertThat(metrics.calls).isEmpty();
     }
 
     @Test

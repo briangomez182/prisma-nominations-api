@@ -1,5 +1,6 @@
 package com.prisma.nominations.application.service;
 
+import com.prisma.nominations.application.exception.AbmContractException;
 import com.prisma.nominations.application.exception.AbmUnavailableException;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.application.port.in.SubmitToAbmUseCase.SubmitOutcome;
@@ -31,8 +32,9 @@ class SubmitToAbmServiceTest {
 
     private final InMemoryNominationRepository repository = InMemoryNominationRepository.withOptimisticLocking();
     private final FakeAbmClient abm = new FakeAbmClient();
+    private final RecordingNominationMetrics metrics = new RecordingNominationMetrics();
     private final SubmitToAbmService service = new SubmitToAbmService(repository, abm,
-            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC));
+            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), metrics);
 
     /** ABM en memoria: registra los pedidos y permite simular fallas o efectos durante la llamada. */
     static final class FakeAbmClient implements AbmClient {
@@ -86,6 +88,7 @@ class SubmitToAbmServiceTest {
             assertThat(request.cardId()).isEqualTo("tok_4f9a2c");
         });
         assertThat(repository.findHistory(nomination.id())).extracting(c -> c.to()).containsExactly(RECEIVED, PENDING_ABM);
+        assertThat(metrics.calls).containsExactly("submission:SUBMITTED");
     }
 
     @Test
@@ -97,6 +100,7 @@ class SubmitToAbmServiceTest {
 
         assertThat(outcome).isEqualTo(SubmitOutcome.SKIPPED);
         assertThat(abm.requests).hasSize(1);
+        assertThat(metrics.calls).containsExactly("submission:SUBMITTED", "submission:SKIPPED");
     }
 
     @Test
@@ -118,6 +122,16 @@ class SubmitToAbmServiceTest {
 
         assertThatThrownBy(() -> service.submit(nomination.id())).isSameAs(abm.failure);
         assertThat(reload(nomination.id()).status()).isEqualTo(RECEIVED);
+        assertThat(metrics.calls).containsExactly("submission:UNAVAILABLE");
+    }
+
+    @Test
+    void abmContractErrorIsCountedAndPropagated() {
+        var nomination = received();
+        abm.failure = new AbmContractException("400 Bad Request");
+
+        assertThatThrownBy(() -> service.submit(nomination.id())).isSameAs(abm.failure);
+        assertThat(metrics.calls).containsExactly("submission:CONTRACT_ERROR");
     }
 
     @Test

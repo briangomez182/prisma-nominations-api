@@ -23,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
@@ -384,7 +385,7 @@ class NominationEventFlowIntegrationTest {
     }
 
     static MockHttpServletRequestBuilder create(String entity, String body) {
-        return post(BASE).header(ApiHeaders.ENTITY_ID, entity)
+        return post(BASE).header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }

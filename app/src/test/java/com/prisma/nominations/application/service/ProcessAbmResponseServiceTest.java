@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -35,8 +36,9 @@ class ProcessAbmResponseServiceTest {
 
     private final InMemoryNominationRepository repository = InMemoryNominationRepository.withOptimisticLocking();
     private final FakeOutbox outbox = new FakeOutbox();
+    private final RecordingNominationMetrics metrics = new RecordingNominationMetrics();
     private final ProcessAbmResponseService service = new ProcessAbmResponseService(repository, outbox,
-            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC));
+            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), metrics);
 
     /** Outbox en memoria con la regla del índice único: un solo nomination.result por nominación. */
     static final class FakeOutbox implements OutboxPort {
@@ -93,6 +95,10 @@ class ProcessAbmResponseServiceTest {
         });
         assertThat(repository.findHistory(nomination.id())).last()
                 .satisfies(change -> assertThat(change.source()).isEqualTo(ChangeSource.ABM_RESPONSE));
+        assertThat(metrics.calls).containsExactly("abmResponse:APPLIED", "resolved:APPROVED");
+        // Tiempo de resolución: desde el alta (NOW - 300 s) hasta la respuesta (NOW).
+        assertThat(metrics.resolved).singleElement().satisfies(n ->
+                assertThat(Duration.between(n.createdAt(), n.updatedAt())).isEqualTo(Duration.ofSeconds(300)));
     }
 
     @Test
@@ -110,6 +116,8 @@ class ProcessAbmResponseServiceTest {
             assertThat(event.status()).isEqualTo(REJECTED);
             assertThat(event.rejectionReason()).isEqualTo(RejectionReason.ACCOUNT_BLOCKED);
         });
+        assertThat(metrics.resolved).singleElement()
+                .satisfies(n -> assertThat(n.rejectionReason()).isEqualTo(RejectionReason.ACCOUNT_BLOCKED));
     }
 
     @Test
@@ -123,6 +131,8 @@ class ProcessAbmResponseServiceTest {
         assertThat(outcome).isEqualTo(ResolutionOutcome.DUPLICATE);
         assertThat(repository.saves).isEqualTo(saves);
         assertThat(outbox.events).hasSize(1);
+        // Solo la primera respuesta resuelve; la duplicada se cuenta como respuesta pero no como resolución.
+        assertThat(metrics.calls).containsExactly("abmResponse:APPLIED", "resolved:APPROVED", "abmResponse:DUPLICATE");
     }
 
     @Test
@@ -188,6 +198,8 @@ class ProcessAbmResponseServiceTest {
 
         assertThat(outcome).isEqualTo(ResolutionOutcome.DUPLICATE);
         assertThat(outbox.results(nomination.id())).isEqualTo(1);
+        // El intento que perdió la carrera no deja métricas: solo cuenta el resultado reevaluado.
+        assertThat(metrics.calls).containsExactly("abmResponse:DUPLICATE");
     }
 
     @Test

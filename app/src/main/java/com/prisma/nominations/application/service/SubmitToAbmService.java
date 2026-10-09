@@ -6,6 +6,8 @@ import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.application.port.in.SubmitToAbmUseCase;
 import com.prisma.nominations.application.port.out.AbmClient;
 import com.prisma.nominations.application.port.out.AbmRequest;
+import com.prisma.nominations.application.port.out.NominationMetrics;
+import com.prisma.nominations.application.port.out.NominationMetrics.SubmissionOutcome;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.NominationStatus;
@@ -45,13 +47,15 @@ class SubmitToAbmService implements SubmitToAbmUseCase {
     private final AbmClient abmClient;
     private final TransactionOperations transactions;
     private final Clock clock;
+    private final NominationMetrics metrics;
 
     SubmitToAbmService(NominationRepository repository, AbmClient abmClient, TransactionOperations transactions,
-                       Clock clock) {
+                       Clock clock, NominationMetrics metrics) {
         this.repository = repository;
         this.abmClient = abmClient;
         this.transactions = transactions;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     /**
@@ -67,11 +71,22 @@ class SubmitToAbmService implements SubmitToAbmUseCase {
         if (nomination.status() != NominationStatus.RECEIVED) {
             log.info("Envío a ABM omitido: nomination_id={} ya está en {} (reentrega o ABM ya respondió)",
                     nominationId, nomination.status());
+            metrics.submission(SubmissionOutcome.SKIPPED);
             return SubmitOutcome.SKIPPED;
         }
 
         // Fuera de transacción. Las excepciones de ABM se propagan sin tocar el estado (sigue RECEIVED).
-        String abmOperationId = abmClient.submit(toRequest(nomination));
+        // Cada intento fallido cuenta: la tasa de UNAVAILABLE anticipa la apertura del circuito y los ABM_TIMEOUT.
+        String abmOperationId;
+        try {
+            abmOperationId = abmClient.submit(toRequest(nomination));
+        } catch (AbmUnavailableException e) {
+            metrics.submission(SubmissionOutcome.UNAVAILABLE);
+            throw e;
+        } catch (AbmContractException e) {
+            metrics.submission(SubmissionOutcome.CONTRACT_ERROR);
+            throw e;
+        }
 
         try {
             confirmSent(nominationId, abmOperationId);
@@ -80,6 +95,7 @@ class SubmitToAbmService implements SubmitToAbmUseCase {
             log.debug("Lock optimista al confirmar el envío de nomination_id={}: se reintenta", nominationId);
             confirmSent(nominationId, abmOperationId);
         }
+        metrics.submission(SubmissionOutcome.SUBMITTED);
         return SubmitOutcome.SUBMITTED;
     }
 

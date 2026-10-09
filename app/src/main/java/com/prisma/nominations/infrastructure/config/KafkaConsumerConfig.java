@@ -1,12 +1,15 @@
 package com.prisma.nominations.infrastructure.config;
 
 import com.prisma.nominations.infrastructure.adapter.in.messaging.InvalidEventException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.kafka.KafkaConnectionDetails;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -16,7 +19,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ContainerProperties.AckMode;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
@@ -49,21 +51,26 @@ public class KafkaConsumerConfig implements DisposableBean {
 
     @Bean(NOTIFICATIONS_CONTAINER_FACTORY)
     ConcurrentKafkaListenerContainerFactory<String, String> notificationsContainerFactory(
-            KafkaProperties kafkaProperties, KafkaConnectionDetails connectionDetails, DemoConsumerProperties props) {
+            KafkaProperties kafkaProperties, KafkaConnectionDetails connectionDetails, DemoConsumerProperties props,
+            ObjectProvider<ObservationRegistry> observations, ObjectProvider<MeterRegistry> meters) {
+        ObservationRegistry observationRegistry = KafkaClientObservability.observations(observations);
 
         Map<String, Object> consumerProps = kafkaProperties.buildConsumerProperties(null);
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, connectionDetails.getConsumer().getBootstrapServers());
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, props.groupId());
         var consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps,
                 new StringDeserializer(), new StringDeserializer());
+        KafkaClientObservability.meter(consumerFactory, meters);
 
         Map<String, Object> producerProps = kafkaProperties.buildProducerProperties(null);
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, connectionDetails.getProducer().getBootstrapServers());
         dltProducerFactory = new DefaultKafkaProducerFactory<>(producerProps,
                 new StringSerializer(), new StringSerializer());
+        KafkaClientObservability.meter(dltProducerFactory, meters);
 
         // Mismo nombre que el original + "-dlt" y misma partición (el DLT tiene las mismas particiones).
-        var recoverer = new DeadLetterPublishingRecoverer(new KafkaTemplate<>(dltProducerFactory),
+        var recoverer = new DeadLetterPublishingRecoverer(
+                KafkaClientObservability.observedTemplate(dltProducerFactory, observationRegistry),
                 (rec, ex) -> new TopicPartition(rec.topic() + KafkaTopicsConfig.DLT_SUFFIX, rec.partition()));
         var errorHandler = new DefaultErrorHandler(recoverer,
                 new FixedBackOff(props.backoff().toMillis(), Math.max(props.maxAttempts() - 1, 0)));
@@ -74,6 +81,8 @@ public class KafkaConsumerConfig implements DisposableBean {
         factory.setCommonErrorHandler(errorHandler);
         // Commit por registro, después de procesarlo (at-least-once): una caída reentrega a lo sumo el último.
         factory.getContainerProperties().setAckMode(AckMode.RECORD);
+        // Span CONSUMER hijo del traceparent del mensaje: traceId/spanId en el MDC del listener.
+        KafkaClientObservability.observe(factory, observationRegistry);
         return factory;
     }
 

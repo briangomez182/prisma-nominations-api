@@ -4,12 +4,17 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prisma.nominations.infrastructure.config.KafkaTopics;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -44,6 +49,11 @@ import java.util.concurrent.TimeUnit;
  * <p>Ante una falla de envío se registra el intento y se corta el lote: no se publica nada posterior
  * fuera de orden y no se acumulan timeouts contra un broker caído. El ciclo siguiente reintenta.
  *
+ * <p><b>Trazas:</b> si la fila trae {@code traceparent} (contexto W3C guardado al hacer append), el envío corre
+ * dentro de un span hijo de esa traza ({@code outbox.relay}) aunque ocurra en otro hilo y más tarde; el
+ * KafkaTemplate con observation crea el span PRODUCER e inyecta el {@code traceparent} nuevo en el mensaje, así el
+ * consumer continúa la misma traza. Sin traceparent (filas viejas, tracing apagado) se publica sin padre.
+ *
  * <p>En producción este componente se reemplaza por Debezium (CDC) sobre la misma tabla.
  */
 @Component
@@ -53,6 +63,7 @@ public class OutboxRelay {
 
     static final int MAX_ERROR_LENGTH = 500;
     static final String MDC_CORRELATION_ID = "correlationId";
+    static final String RELAY_SPAN_NAME = "outbox.relay";
 
     /** Cabezas pendientes por agregado, en orden de creación (desempate por id, igual que el ORDER BY). */
     private static final String SELECT_BATCH = """
@@ -78,28 +89,48 @@ public class OutboxRelay {
     private final ObjectMapper objectMapper;
     private final int batchSize;
     private final Duration sendTimeout;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     /**
      * Template propio con {@code max.block.ms = send-timeout}: con el broker caído, {@code send()} no
-     * bloquea los 60 s por defecto esperando metadata mientras la transacción retiene las filas.
+     * bloquea los 60 s por defecto esperando metadata mientras la transacción retiene las filas. Con observation
+     * habilitada (span PRODUCER + header traceparent). Tracing opcional: sin él, todo es no-op.
      */
     @Autowired
     OutboxRelay(JdbcTemplate jdbc, PlatformTransactionManager txManager, ProducerFactory<String, String> producerFactory,
-                ObjectMapper objectMapper, OutboxProperties properties) {
-        this(jdbc, txManager,
-                new KafkaTemplate<>(producerFactory,
-                        Map.of(ProducerConfig.MAX_BLOCK_MS_CONFIG, properties.relay().sendTimeout().toMillis())),
-                objectMapper, properties);
+                ObjectMapper objectMapper, OutboxProperties properties, ObjectProvider<ObservationRegistry> observations,
+                ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
+        this(jdbc, txManager, observedTemplate(producerFactory, properties, observations), objectMapper, properties,
+                tracer.getIfUnique(() -> Tracer.NOOP), propagator.getIfUnique(() -> Propagator.NOOP));
     }
 
     OutboxRelay(JdbcTemplate jdbc, PlatformTransactionManager txManager, KafkaTemplate<String, String> kafka,
                 ObjectMapper objectMapper, OutboxProperties properties) {
+        this(jdbc, txManager, kafka, objectMapper, properties, Tracer.NOOP, Propagator.NOOP);
+    }
+
+    OutboxRelay(JdbcTemplate jdbc, PlatformTransactionManager txManager, KafkaTemplate<String, String> kafka,
+                ObjectMapper objectMapper, OutboxProperties properties, Tracer tracer, Propagator propagator) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(txManager);
         this.kafka = kafka;
         this.objectMapper = objectMapper;
         this.batchSize = properties.relay().batchSize();
         this.sendTimeout = properties.relay().sendTimeout();
+        this.tracer = tracer;
+        this.propagator = propagator;
+    }
+
+    private static KafkaTemplate<String, String> observedTemplate(ProducerFactory<String, String> producerFactory,
+                                                                  OutboxProperties properties,
+                                                                  ObjectProvider<ObservationRegistry> observations) {
+        var template = new KafkaTemplate<>(producerFactory,
+                Map.of(ProducerConfig.MAX_BLOCK_MS_CONFIG, properties.relay().sendTimeout().toMillis()));
+        // Creado con new (no es bean): el registry se pasa a mano, no lo resuelve desde el contexto.
+        template.setObservationEnabled(true);
+        template.setObservationRegistry(observations.getIfUnique(() -> ObservationRegistry.NOOP));
+        return template;
     }
 
     /**
@@ -134,25 +165,44 @@ public class OutboxRelay {
         if (correlationId != null) {
             MDC.put(MDC_CORRELATION_ID, correlationId);
         }
-        try {
+        Span span = relaySpan(event, text(headers, KafkaTopics.HEADER_TRACEPARENT, null));
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
             kafka.send(toRecord(event, headers)).get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
             jdbc.update(MARK_PUBLISHED, event.id());
             log.debug("Outbox: evento {} ({}) publicado en {}", event.id(), event.eventType(), event.topic());
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            span.error(e);
             registerFailure(event, e);
             return false;
         } catch (Exception e) {
+            span.error(e);
             registerFailure(event, e);
             return false;
         } finally {
+            span.end();
             if (previous != null) {
                 MDC.put(MDC_CORRELATION_ID, previous);
             } else {
                 MDC.remove(MDC_CORRELATION_ID);
             }
         }
+    }
+
+    /**
+     * Span del envío, hijo del contexto guardado en la fila (si lo hay). Sin traceparent o con uno ilegible, el
+     * span abre una traza nueva: la correlación de negocio sigue por correlation_id.
+     */
+    private Span relaySpan(PendingEvent event, String traceparent) {
+        Span.Builder builder = traceparent == null
+                ? tracer.spanBuilder()
+                : propagator.extract(Map.of(KafkaTopics.HEADER_TRACEPARENT, traceparent), Map::get);
+        return builder.name(RELAY_SPAN_NAME)
+                .tag("event_type", event.eventType())
+                .tag("event_id", event.id().toString())
+                .tag("messaging.destination.name", event.topic())
+                .start();
     }
 
     private void registerFailure(PendingEvent event, Exception e) {
@@ -169,6 +219,8 @@ public class OutboxRelay {
         addHeader(record, KafkaTopics.HEADER_EVENT_TYPE, text(headers, KafkaTopics.HEADER_EVENT_TYPE, event.eventType()));
         addHeader(record, KafkaTopics.HEADER_SCHEMA_VERSION, text(headers, KafkaTopics.HEADER_SCHEMA_VERSION, null));
         addHeader(record, KafkaTopics.HEADER_CORRELATION_ID, text(headers, KafkaTopics.HEADER_CORRELATION_ID, null));
+        // Respaldo: con observation, el KafkaTemplate lo reemplaza por el del span PRODUCER (misma traza).
+        addHeader(record, KafkaTopics.HEADER_TRACEPARENT, text(headers, KafkaTopics.HEADER_TRACEPARENT, null));
         return record;
     }
 

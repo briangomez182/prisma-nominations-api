@@ -12,6 +12,7 @@ import com.prisma.nominations.infrastructure.adapter.in.web.ApiHeaders;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -81,7 +82,8 @@ class AbmTimeoutRecoveryIntegrationTest {
     void operatorReprocessesTimedOutNomination() throws Exception {
         UUID id = timedOut();
 
-        mockMvc.perform(post(REPROCESS, id).header(ApiHeaders.CORRELATION_ID, "it-reprocess-" + id))
+        mockMvc.perform(post(REPROCESS, id).header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer())
+                        .header(ApiHeaders.CORRELATION_ID, "it-reprocess-" + id))
                 .andExpect(status().isAccepted())
                 .andExpect(header().string("Location", "/v1/nominations/" + id))
                 .andExpect(header().string(ApiHeaders.CORRELATION_ID, "it-reprocess-" + id))
@@ -112,7 +114,7 @@ class AbmTimeoutRecoveryIntegrationTest {
         assertThat(lastHistory(id)).isEqualTo(List.of("APPROVED", "ABM_RESPONSE"));
         assertThat(outboxCount(id, "nomination.result")).isEqualTo(1);
 
-        mockMvc.perform(post(REPROCESS, id))
+        mockMvc.perform(post(REPROCESS, id).header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer()))
                 .andExpect(status().isConflict())
                 .andExpect(header().string("Content-Type", "application/problem+json"))
                 .andExpect(jsonPath("$.code").value("INVALID_STATE_TRANSITION"))
@@ -125,7 +127,7 @@ class AbmTimeoutRecoveryIntegrationTest {
     @Test
     @DisplayName("Reproceso de una nominación inexistente: 404")
     void reprocessUnknownIsNotFound() throws Exception {
-        mockMvc.perform(post(REPROCESS, UUID.randomUUID()))
+        mockMvc.perform(post(REPROCESS, UUID.randomUUID()).header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOMINATION_NOT_FOUND"));
     }
@@ -133,7 +135,7 @@ class AbmTimeoutRecoveryIntegrationTest {
     @Test
     @DisplayName("Reproceso con id que no es UUID: 400")
     void reprocessWithInvalidIdIsBadRequest() throws Exception {
-        mockMvc.perform(post(REPROCESS, "no-es-uuid"))
+        mockMvc.perform(post(REPROCESS, "no-es-uuid").header(HttpHeaders.AUTHORIZATION, TestTokens.operatorBearer()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_PARAMETER"));
     }

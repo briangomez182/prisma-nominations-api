@@ -29,8 +29,9 @@ class NominationCommandServiceTest {
     private final InMemoryNominationRepository repository = new InMemoryNominationRepository();
     /** Outbox en memoria: registra los eventos agregados. */
     private final List<IntegrationEvent> outbox = new ArrayList<>();
+    private final RecordingNominationMetrics metrics = new RecordingNominationMetrics();
     private final NominationCommandService service = new NominationCommandService(repository, outbox::add,
-            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC));
+            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), metrics);
 
     private static CreateNominationCommand command(UUID requestId) {
         return new CreateNominationCommand("ENT01", requestId, "123456", "987654", "tok_4f9a2c",
@@ -53,6 +54,7 @@ class NominationCommandServiceTest {
             assertThat(event.correlationId()).isEqualTo("corr-1");
             assertThat(event.occurredAt()).isEqualTo(NOW);
         });
+        assertThat(metrics.calls).containsExactly("created:ENT01");
     }
 
     @Test
@@ -67,6 +69,7 @@ class NominationCommandServiceTest {
         assertThat(repository.count()).isEqualTo(1);
         assertThat(repository.saves).isEqualTo(1);
         assertThat(outbox).hasSize(1);
+        assertThat(metrics.calls).containsExactly("created:ENT01", "replayed:ENT01");
     }
 
     @Test
@@ -80,6 +83,7 @@ class NominationCommandServiceTest {
         assertThatThrownBy(() -> service.create(changed)).isInstanceOf(IdempotencyConflictException.class);
         assertThat(repository.count()).isEqualTo(1);
         assertThat(outbox).hasSize(1);
+        assertThat(metrics.calls).containsExactly("created:ENT01", "idempotencyConflict:ENT01");
     }
 
     @Test

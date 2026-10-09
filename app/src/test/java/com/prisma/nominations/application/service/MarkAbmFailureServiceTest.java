@@ -27,8 +27,9 @@ class MarkAbmFailureServiceTest {
     private static final String DETAIL = "Reintentos agotados: ABM no disponible";
 
     private final InMemoryNominationRepository repository = InMemoryNominationRepository.withOptimisticLocking();
+    private final RecordingNominationMetrics metrics = new RecordingNominationMetrics();
     private final MarkAbmFailureService service = new MarkAbmFailureService(repository,
-            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC));
+            TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), metrics);
 
     private Nomination received() {
         return repository.save(Nomination.receive("ENT01", UUID.randomUUID(), "123456",
@@ -69,6 +70,7 @@ class MarkAbmFailureServiceTest {
             assertThat(change.source()).isEqualTo(ChangeSource.ABM_ADAPTER);
             assertThat(change.detail()).isEqualTo(DETAIL);
         });
+        assertThat(metrics.calls).containsExactly("abmTimeout:ABM_ADAPTER");
     }
 
     @Test
@@ -102,6 +104,7 @@ class MarkAbmFailureServiceTest {
         assertThat(service.markFailed(nomination.id(), DETAIL)).isFalse();
 
         assertThat(repository.saves).isEqualTo(savesBefore);
+        assertThat(metrics.calls).containsExactly("abmTimeout:ABM_ADAPTER"); // solo el primero
         assertThat(repository.findHistory(nomination.id())).extracting(c -> c.to())
                 .containsExactly(RECEIVED, ABM_TIMEOUT);
     }
@@ -115,6 +118,7 @@ class MarkAbmFailureServiceTest {
         assertThat(service.markFailed(nomination.id(), DETAIL)).isFalse();
 
         assertThat(reload(nomination.id()).status()).isEqualTo(APPROVED);
+        assertThat(metrics.calls).isEmpty();
     }
 
     @Test

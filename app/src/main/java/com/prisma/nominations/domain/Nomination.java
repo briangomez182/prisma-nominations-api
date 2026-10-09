@@ -1,11 +1,11 @@
 package com.prisma.nominations.domain;
 
 import java.time.Instant;
-import java.util.regex.Pattern;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Agregado raíz. Todo cambio de estado pasa por {@link #transitionTo} y queda registrado como

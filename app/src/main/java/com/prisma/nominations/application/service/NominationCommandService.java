@@ -6,6 +6,7 @@ import com.prisma.nominations.application.exception.IdempotencyConflictException
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
 import com.prisma.nominations.application.port.in.CreateNominationResult;
 import com.prisma.nominations.application.port.in.CreateNominationUseCase;
+import com.prisma.nominations.application.port.out.NominationMetrics;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.application.port.out.OutboxPort;
 import com.prisma.nominations.domain.AccountId;
@@ -35,13 +36,15 @@ class NominationCommandService implements CreateNominationUseCase {
     private final OutboxPort outbox;
     private final TransactionOperations transactions;
     private final Clock clock;
+    private final NominationMetrics metrics;
 
     NominationCommandService(NominationRepository repository, OutboxPort outbox, TransactionOperations transactions,
-                             Clock clock) {
+                             Clock clock, NominationMetrics metrics) {
         this.repository = repository;
         this.outbox = outbox;
         this.transactions = transactions;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Override
@@ -64,6 +67,7 @@ class NominationCommandService implements CreateNominationUseCase {
                 return created;
             });
             log.info("Nominación creada nomination_id={} request_id={}", saved.id(), saved.requestId());
+            metrics.created(saved.entityId());
             return new CreateNominationResult(saved, false);
         } catch (DuplicateNominationException race) {
             // Otra request concurrente insertó primero. La TX fallida ya hizo rollback: se relee en una nueva.
@@ -76,9 +80,11 @@ class NominationCommandService implements CreateNominationUseCase {
     private CreateNominationResult replay(Nomination existing, CreateNominationCommand command) {
         if (!sameContent(existing, command)) {
             log.warn("Conflicto de idempotencia nomination_id={} request_id={}", existing.id(), command.requestId());
+            metrics.idempotencyConflict(existing.entityId());
             throw new IdempotencyConflictException(command.requestId());
         }
         log.info("Replay de nominación existente nomination_id={} request_id={}", existing.id(), command.requestId());
+        metrics.replayed(existing.entityId());
         return new CreateNominationResult(existing, true);
     }
 

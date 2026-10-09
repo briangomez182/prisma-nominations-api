@@ -25,9 +25,9 @@ import static com.prisma.nominations.infrastructure.adapter.in.web.OpenApiExampl
 /**
  * Endpoints de operación (back-office), separados de la API pública /v1 que usan las entidades.
  * <p>
- * Sin X-Entity-Id: el operador ve las nominaciones de todas las entidades. Por eso <b>no</b> debe quedar expuesto
- * como la API pública: la fase de seguridad le exige un rol/scope de operador (p.ej. {@code nominations:operate})
- * y, en producción, se publica solo hacia la red interna.
+ * Sin entidad: el operador ve las nominaciones de todas las entidades. Por eso <b>no</b> debe quedar expuesto
+ * como la API pública: SecurityConfig exige el scope {@code nominations:operate} y, en producción, se publica
+ * solo hacia la red interna.
  */
 @Tag(name = NominationOperationsController.TAG,
         description = "Recuperación controlada por un operador (uso interno, no para entidades)")
@@ -53,7 +53,7 @@ public class NominationOperationsController {
                     Solo desde `ABM_TIMEOUT`; desde cualquier otro estado responde **409** sin cambios. ABM es \
                     idempotente por `nomination_id`: si el pedido original sí había llegado, no se crea otro alta.
 
-                    **Uso interno**: requiere rol de operador (fase de seguridad); no usa `X-Entity-Id`.""")
+                    **Uso interno**: requiere el scope `nominations:operate`; no está acotado a una entidad.""")
     // X-Correlation-Id (request y response) lo agrega OpenApiConfig a todas las operaciones de /internal.
     @ApiResponse(responseCode = "202", description = "Reproceso aceptado: la nominación vuelve a `RECEIVED`",
             headers = @Header(name = "Location", description = "URI pública de la nominación",

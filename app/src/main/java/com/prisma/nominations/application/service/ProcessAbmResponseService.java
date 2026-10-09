@@ -4,8 +4,10 @@ import com.prisma.nominations.application.event.NominationResult;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.application.port.in.AbmResponseCommand;
 import com.prisma.nominations.application.port.in.ProcessAbmResponseUseCase;
+import com.prisma.nominations.application.port.out.NominationMetrics;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.application.port.out.OutboxPort;
+import com.prisma.nominations.domain.Nomination;
 import com.prisma.nominations.domain.ResolutionOutcome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,27 +37,39 @@ class ProcessAbmResponseService implements ProcessAbmResponseUseCase {
     private final OutboxPort outbox;
     private final TransactionOperations transactions;
     private final Clock clock;
+    private final NominationMetrics metrics;
 
     ProcessAbmResponseService(NominationRepository repository, OutboxPort outbox, TransactionOperations transactions,
-                              Clock clock) {
+                              Clock clock, NominationMetrics metrics) {
         this.repository = repository;
         this.outbox = outbox;
         this.transactions = transactions;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Override
     public ResolutionOutcome process(AbmResponseCommand command) {
+        Applied applied;
         try {
-            return apply(command);
+            applied = apply(command);
         } catch (OptimisticLockingFailureException | IllegalStateException race) {
             log.debug("Respuesta de ABM concurrente para nomination_id={}: se reevalúa ({})",
                     command.nominationId(), race.getClass().getSimpleName());
-            return apply(command);
+            applied = apply(command);
         }
+        // Métricas recién con la TX confirmada: el intento que perdió la carrera no cuenta.
+        metrics.abmResponse(applied.outcome());
+        if (applied.outcome() == ResolutionOutcome.APPLIED) {
+            metrics.resolved(applied.nomination());
+        }
+        return applied.outcome();
     }
 
-    private ResolutionOutcome apply(AbmResponseCommand command) {
+    private record Applied(ResolutionOutcome outcome, Nomination nomination) {
+    }
+
+    private Applied apply(AbmResponseCommand command) {
         return transactions.execute(status -> {
             var nomination = repository.findById(command.nominationId())
                     .filter(n -> n.requestId().equals(command.requestId()))
@@ -72,13 +86,13 @@ class ProcessAbmResponseService implements ProcessAbmResponseUseCase {
                 }
                 case DUPLICATE -> log.debug("Respuesta de ABM duplicada, sin efectos: nomination_id={} estado={}",
                         nomination.id(), nomination.status());
-                // Alerta: ABM contradice un resultado ya publicado. La métrica llega con la fase de observabilidad.
+                // Alerta: ABM contradice un resultado ya publicado (abm_responses_total{outcome="CONFLICT"}).
                 case CONFLICT -> log.warn("Respuesta de ABM contradictoria, se ignora: nomination_id={} "
                                 + "resultado_actual={} resultado_recibido={} abm_operation_id={}",
                         nomination.id(), nomination.status(), command.decision().targetStatus(),
                         command.abmOperationId());
             }
-            return outcome;
+            return new Applied(outcome, nomination);
         });
     }
 }

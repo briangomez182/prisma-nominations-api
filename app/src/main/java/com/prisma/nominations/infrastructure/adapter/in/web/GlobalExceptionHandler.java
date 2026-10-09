@@ -18,6 +18,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.lang.Nullable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.ServletRequestBindingException;
@@ -70,6 +71,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         MISSING_HEADER(HttpStatus.BAD_REQUEST, "Header obligatorio ausente", "Falta un header obligatorio"),
         INVALID_PARAMETER(HttpStatus.BAD_REQUEST, "Parámetro inválido", "Un parámetro de la solicitud tiene formato inválido"),
         BAD_REQUEST(HttpStatus.BAD_REQUEST, "Solicitud inválida", "La solicitud no pudo procesarse"),
+        UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "No autenticado", "Se requiere un token de acceso válido"),
+        FORBIDDEN(HttpStatus.FORBIDDEN, "Acceso denegado", "El token no tiene permisos para esta operación"),
         NOMINATION_NOT_FOUND(HttpStatus.NOT_FOUND, "Nominación inexistente", "No existe la nominación solicitada"),
         RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "Recurso inexistente", "El recurso solicitado no existe"),
         METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Método no permitido", "El método HTTP no está soportado para este recurso"),
@@ -101,6 +104,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             return status;
         }
 
+        public String title() {
+            return title;
+        }
+
+        public String defaultDetail() {
+            return defaultDetail;
+        }
+
         public URI type() {
             return URI.create(PROBLEM_TYPE_BASE + name().toLowerCase(Locale.ROOT).replace('_', '-'));
         }
@@ -112,6 +123,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             }
             return switch (status.value()) {
                 case 400 -> BAD_REQUEST;
+                case 401 -> UNAUTHORIZED;
+                case 403 -> FORBIDDEN;
                 case 404 -> RESOURCE_NOT_FOUND;
                 case 405 -> METHOD_NOT_ALLOWED;
                 case 406 -> NOT_ACCEPTABLE;
@@ -155,6 +168,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ResponseEntity<Object> handleOptimisticLock(OptimisticLockingFailureException ex, WebRequest request) {
         return respond(ex, problem(ProblemCode.CONCURRENT_MODIFICATION, null), request);
+    }
+
+    /** Denegación detectada dentro de MVC (p.ej. token sin entidad al resolver {@link AuthenticatedEntity}). */
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex, WebRequest request) {
+        return respond(ex, problem(ProblemCode.FORBIDDEN, null), request);
     }
 
     @ExceptionHandler(Exception.class)
@@ -228,6 +247,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     // ---------------------------------------------------------------- soporte
+
+    /**
+     * Problema completo (code, correlation_id, timestamp, instance) para errores que ocurren fuera de Spring MVC,
+     * en la cadena de seguridad ({@link SecurityProblemHandler}). Mismo formato que el resto de la API.
+     */
+    static ProblemDetail securityProblem(ProblemCode code, Exception ex) {
+        ProblemDetail problem = problem(code, null);
+        String correlationId = MDC.get(ApiHeaders.CORRELATION_ID_MDC_KEY);
+        problem.setProperty("correlation_id", correlationId);
+        problem.setProperty("timestamp", Instant.now());
+        problem.setInstance(instance(correlationId));
+        logProblem(ex, problem);
+        return problem;
+    }
 
     private ResponseEntity<Object> respond(Exception ex, ProblemDetail problem, WebRequest request) {
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatusCode.valueOf(problem.getStatus()), request);

@@ -13,10 +13,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.security.oauth2.resource.servlet.OAuth2ResourceServerAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -40,12 +44,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = GlobalExceptionHandlerTest.ErrorTestController.class)
+// Sin la cadena de seguridad: acá se prueba el modelo de errores de MVC (401/403 de la cadena: SecurityIntegrationTest).
+@WebMvcTest(controllers = GlobalExceptionHandlerTest.ErrorTestController.class, excludeAutoConfiguration = {
+        SecurityAutoConfiguration.class, SecurityFilterAutoConfiguration.class, OAuth2ResourceServerAutoConfiguration.class})
 // El controller de prueba es una clase anidada: el escaneo de tests la excluye, por eso se importa explícitamente.
 @Import({ErrorTestController.class, GlobalExceptionHandler.class, CorrelationIdFilter.class})
 class GlobalExceptionHandlerTest {
 
     private static final String PAN = "4111111111111111";
+    private static final String REQUIRED_HEADER = "X-Required";
     private static final String VALID_BODY = """
             {"request_id": "%s", "card_id": "tok_123", "account_number": "987654"}
             """.formatted(UUID.randomUUID());
@@ -59,7 +66,7 @@ class GlobalExceptionHandlerTest {
                 {"card_id": "%s", "account_number": ""}
                 """.formatted(PAN);
 
-        MvcResult result = expectProblem(post("/test/validated").header(ApiHeaders.ENTITY_ID, "ENT-1")
+        MvcResult result = expectProblem(post("/test/validated").header(REQUIRED_HEADER, "v")
                 .contentType(MediaType.APPLICATION_JSON).content(body), 400, "VALIDATION_ERROR")
                 .andExpect(jsonPath("$.type").value("https://api.prisma.example/problems/validation-error"))
                 .andExpect(jsonPath("$.errors[*].field").value(containsInAnyOrder("request_id", "card_id", "account_number")))
@@ -90,7 +97,7 @@ class GlobalExceptionHandlerTest {
                 {"request_id": "%s", "card_id": "tok_1", "account_number": "987654"}
                 """.formatted(PAN);
 
-        MvcResult result = expectProblem(post("/test/validated").header(ApiHeaders.ENTITY_ID, "ENT-1")
+        MvcResult result = expectProblem(post("/test/validated").header(REQUIRED_HEADER, "v")
                 .contentType(MediaType.APPLICATION_JSON).content(body), 400, "MALFORMED_REQUEST")
                 .andExpect(jsonPath("$.errors[0].field").value("request_id"))
                 .andReturn();
@@ -100,7 +107,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void invalidJsonIsMalformedRequest() throws Exception {
-        expectProblem(post("/test/validated").header(ApiHeaders.ENTITY_ID, "ENT-1")
+        expectProblem(post("/test/validated").header(REQUIRED_HEADER, "v")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"card_id\": "), 400, "MALFORMED_REQUEST");
     }
 
@@ -125,6 +132,7 @@ class GlobalExceptionHandlerTest {
             "idempotency, 409, IDEMPOTENCY_CONFLICT",
             "duplicate,   409, IDEMPOTENCY_CONFLICT",
             "optimistic,  409, CONCURRENT_MODIFICATION",
+            "forbidden,   403, FORBIDDEN",
             "unexpected,  500, INTERNAL_ERROR"
     })
     void applicationExceptionsAreMapped(String kind, int status, String code) throws Exception {
@@ -141,7 +149,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void springHandledErrorsFollowTheSameModel() throws Exception {
         expectProblem(delete("/test/validated"), 405, "METHOD_NOT_ALLOWED");
-        expectProblem(post("/test/validated").header(ApiHeaders.ENTITY_ID, "ENT-1")
+        expectProblem(post("/test/validated").header(REQUIRED_HEADER, "v")
                 .contentType(MediaType.TEXT_PLAIN).content(PAN), 415, "UNSUPPORTED_MEDIA_TYPE");
         expectProblem(get("/test/no-existe"), 404, "RESOURCE_NOT_FOUND");
     }
@@ -183,7 +191,7 @@ class GlobalExceptionHandlerTest {
     static class ErrorTestController {
 
         @PostMapping(path = "/test/validated", consumes = MediaType.APPLICATION_JSON_VALUE)
-        void validated(@RequestHeader(ApiHeaders.ENTITY_ID) String entityId, @Valid @RequestBody TestRequest request) {
+        void validated(@RequestHeader(REQUIRED_HEADER) String required, @Valid @RequestBody TestRequest request) {
         }
 
         @PostMapping(path = "/test/domain", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -203,6 +211,7 @@ class GlobalExceptionHandlerTest {
                 case "idempotency" -> new IdempotencyConflictException(UUID.randomUUID());
                 case "duplicate" -> new DuplicateNominationException(new RuntimeException("unique violation"));
                 case "optimistic" -> new OptimisticLockingFailureException("version mismatch");
+                case "forbidden" -> new AccessDeniedException("sin entidad");
                 default -> new IllegalStateException("secreto interno: conexión a db fallida");
             };
         }

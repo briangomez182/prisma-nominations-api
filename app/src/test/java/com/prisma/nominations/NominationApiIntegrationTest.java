@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
@@ -84,14 +85,14 @@ class NominationApiIntegrationTest {
             String nominationId = json(created).get("nomination_id").asText();
             assertThat(location).isEqualTo(BASE + "/" + nominationId);
 
-            mockMvc.perform(get(location).header(ApiHeaders.ENTITY_ID, entity))
+            mockMvc.perform(get(location).header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.nomination_id").value(nominationId))
                     .andExpect(jsonPath("$.status").value("RECEIVED"))
                     .andExpect(jsonPath("$.account_id").value("****7654"))
                     .andExpect(jsonPath("$.card_id").value("****8d1e"));
 
-            mockMvc.perform(get(location + "/history").header(ApiHeaders.ENTITY_ID, entity))
+            mockMvc.perform(get(location + "/history").header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.nomination_id").value(nominationId))
                     .andExpect(jsonPath("$.items", hasSize(1)))
@@ -152,14 +153,15 @@ class NominationApiIntegrationTest {
         }
 
         @Test
-        void missingEntityHeader_returnsMissingHeader() throws Exception {
+        void tokenWithoutEntity_returnsForbiddenAndPersistsNothing() throws Exception {
             UUID requestId = UUID.randomUUID();
 
-            mockMvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON)
+            mockMvc.perform(post(BASE).header(HttpHeaders.AUTHORIZATION,
+                                    TestTokens.token().scopes(TestTokens.WRITE).bearer())
+                            .contentType(MediaType.APPLICATION_JSON)
                             .content(body(requestId, "tok_4f9a2c7b8d1e")))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("MISSING_HEADER"))
-                    .andExpect(jsonPath("$.detail").value("Falta el header obligatorio " + ApiHeaders.ENTITY_ID));
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("FORBIDDEN"));
 
             Integer rows = jdbc.queryForObject("SELECT count(*) FROM nominations WHERE request_id = ?",
                     Integer.class, requestId);
@@ -238,10 +240,10 @@ class NominationApiIntegrationTest {
                     .andExpect(status().isAccepted())
                     .andReturn().getResponse().getHeader("Location");
 
-            mockMvc.perform(get(location).header(ApiHeaders.ENTITY_ID, newEntity()))
+            mockMvc.perform(get(location).header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(newEntity())))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOMINATION_NOT_FOUND"));
-            mockMvc.perform(get(location + "/history").header(ApiHeaders.ENTITY_ID, newEntity()))
+            mockMvc.perform(get(location + "/history").header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(newEntity())))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOMINATION_NOT_FOUND"));
         }
@@ -265,13 +267,29 @@ class NominationApiIntegrationTest {
             assertThat(request.has("requestId")).isFalse();
             assertThat(spec.at("/components/schemas/NominationResponse/properties").has("nomination_id")).isTrue();
             assertThat(spec.at("/components/schemas/ProblemDetail/properties").has("correlation_id")).isTrue();
-            assertThat(spec.at("/components/parameters").has(ApiHeaders.ENTITY_ID)).isTrue();
+            // La entidad sale del token: no hay header ni parámetro de entidad.
+            assertThat(spec.at("/components/parameters").has("X-Entity-Id")).isFalse();
             assertThat(spec.at("/components/parameters").has(ApiHeaders.CORRELATION_ID)).isTrue();
+            assertThat(spec.at("/components/securitySchemes/bearer-jwt/scheme").asText()).isEqualTo("bearer");
+            assertThat(spec.at("/components/responses").has("Unauthorized")).isTrue();
+            assertThat(spec.at("/components/responses").has("Forbidden")).isTrue();
 
-            // Operación (/internal): X-Correlation-Id común en request y response, sin X-Entity-Id.
+            // API pública: scope por operación y parámetros solo X-Correlation-Id (+ path).
+            JsonNode create = spec.at("/paths/~1v1~1nominations/post");
+            assertThat(create.at("/security/0/bearer-jwt/0").asText()).isEqualTo(TestTokens.WRITE);
+            assertThat(create.path("parameters").findValuesAsText("$ref"))
+                    .containsExactly("#/components/parameters/" + ApiHeaders.CORRELATION_ID);
+            assertThat(create.at("/responses/401/$ref").asText()).isEqualTo("#/components/responses/Unauthorized");
+            assertThat(create.at("/responses/403/$ref").asText()).isEqualTo("#/components/responses/Forbidden");
+            JsonNode getOne = spec.at("/paths/~1v1~1nominations~1{nominationId}/get");
+            assertThat(getOne.at("/security/0/bearer-jwt/0").asText()).isEqualTo(TestTokens.READ);
+            assertThat(getOne.path("parameters").findValuesAsText("name")).containsExactly("nominationId");
+
+            // Operación (/internal): X-Correlation-Id común en request y response; scope operate.
             JsonNode reprocess = spec.at("/paths/~1internal~1v1~1nominations~1{nominationId}~1reprocess/post");
             assertThat(reprocess.path("parameters").findValuesAsText("$ref"))
                     .containsExactly("#/components/parameters/" + ApiHeaders.CORRELATION_ID);
+            assertThat(reprocess.at("/security/0/bearer-jwt/0").asText()).isEqualTo(TestTokens.OPERATE);
             assertThat(reprocess.at("/responses/202/headers").has(ApiHeaders.CORRELATION_ID)).isTrue();
             assertThat(reprocess.at("/responses/409/headers").has(ApiHeaders.CORRELATION_ID)).isTrue();
         }
@@ -313,7 +331,7 @@ class NominationApiIntegrationTest {
     }
 
     private static MockHttpServletRequestBuilder create(String entity, String body) {
-        return post(BASE).header(ApiHeaders.ENTITY_ID, entity)
+        return post(BASE).header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }

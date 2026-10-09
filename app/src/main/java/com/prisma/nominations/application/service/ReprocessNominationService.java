@@ -3,6 +3,7 @@ package com.prisma.nominations.application.service;
 import com.prisma.nominations.application.event.NominationRequested;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.application.port.in.ReprocessNominationUseCase;
+import com.prisma.nominations.application.port.out.NominationMetrics;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.application.port.out.OutboxPort;
 import com.prisma.nominations.domain.InvalidStatusTransitionException;
@@ -37,23 +38,28 @@ class ReprocessNominationService implements ReprocessNominationUseCase {
     private final OutboxPort outbox;
     private final TransactionOperations transactions;
     private final Clock clock;
+    private final NominationMetrics metrics;
 
     ReprocessNominationService(NominationRepository repository, OutboxPort outbox, TransactionOperations transactions,
-                               Clock clock) {
+                               Clock clock, NominationMetrics metrics) {
         this.repository = repository;
         this.outbox = outbox;
         this.transactions = transactions;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Override
     public Nomination reprocess(UUID nominationId) {
+        Nomination reprocessed;
         try {
-            return apply(nominationId);
+            reprocessed = apply(nominationId);
         } catch (OptimisticLockingFailureException race) {
             log.debug("Reproceso concurrente con otro cambio para nomination_id={}: se reevalúa", nominationId);
-            return apply(nominationId);
+            reprocessed = apply(nominationId);
         }
+        metrics.reprocessed();
+        return reprocessed;
     }
 
     private Nomination apply(UUID nominationId) {

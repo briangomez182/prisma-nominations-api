@@ -23,6 +23,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -290,7 +291,7 @@ class AbmFlowIntegrationTest {
                 }
                 """.formatted(requestId, ACCOUNT_ID, cardId);
         return http().post().uri("/v1/nominations")
-                .header(ApiHeaders.ENTITY_ID, entity)
+                .header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity))
                 .header(ApiHeaders.CORRELATION_ID, correlationId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
@@ -299,7 +300,7 @@ class AbmFlowIntegrationTest {
     }
 
     private ResponseEntity<String> get(String path, String entity) {
-        return http().get().uri(path).header(ApiHeaders.ENTITY_ID, entity).retrieve().toEntity(String.class);
+        return http().get().uri(path).header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(entity)).retrieve().toEntity(String.class);
     }
 
     private RestClient http() {

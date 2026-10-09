@@ -1,0 +1,12 @@
+# Carga los tableros JSON de /etc/grafana/dashboards (montado desde ops/grafana/dashboards).
+apiVersion: 1
+providers:
+  - name: prisma-nominations
+    folder: Prisma
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

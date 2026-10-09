@@ -1,6 +1,7 @@
 package com.prisma.nominations.infrastructure.adapter.in.scheduling;
 
 import com.prisma.nominations.application.port.in.SweepStaleNominationsUseCase;
+import com.prisma.nominations.application.port.out.NominationMetrics;
 import com.prisma.nominations.application.port.out.NominationRepository;
 import com.prisma.nominations.application.service.SweepStaleNominationsService;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,8 +22,9 @@ class StaleNominationSweeperConfig {
     @Bean
     SweepStaleNominationsUseCase sweepStaleNominationsUseCase(NominationRepository repository,
                                                               TransactionOperations transactions, Clock clock,
-                                                              StaleNominationSweeperProperties properties) {
+                                                              StaleNominationSweeperProperties properties,
+                                                              NominationMetrics metrics) {
         return new SweepStaleNominationsService(repository, transactions, clock, properties.responseSla(),
-                properties.batchSize());
+                properties.batchSize(), metrics);
     }
 }

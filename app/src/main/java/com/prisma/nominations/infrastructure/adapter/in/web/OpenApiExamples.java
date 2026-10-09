@@ -72,18 +72,6 @@ final class OpenApiExamples {
               "errors": [{"field": "request_id", "message": "Tipo o formato inválido"}]
             }""";
 
-    static final String MISSING_HEADER = """
-            {
-              "type": "https://api.prisma.example/problems/missing-header",
-              "title": "Header obligatorio ausente",
-              "status": 400,
-              "detail": "Falta el header obligatorio X-Entity-Id",
-              "instance": "urn:correlation-id:c0ffee00-1234-4abc-9def-000000000001",
-              "code": "MISSING_HEADER",
-              "correlation_id": "c0ffee00-1234-4abc-9def-000000000001",
-              "timestamp": "2026-10-08T12:00:00Z"
-            }""";
-
     static final String INVALID_PARAMETER = """
             {
               "type": "https://api.prisma.example/problems/invalid-parameter",

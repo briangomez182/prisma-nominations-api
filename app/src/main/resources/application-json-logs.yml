@@ -1,0 +1,7 @@
+# Logs estructurados (JSON ECS, una línea por evento) para entornos con agregador (ELK, Loki, Datadog).
+# Activar con SPRING_PROFILES_ACTIVE=json-logs (o LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs sin perfil).
+# Cada línea incluye las claves del MDC: correlationId (negocio), traceId y spanId (W3C).
+logging:
+  structured:
+    format:
+      console: ecs

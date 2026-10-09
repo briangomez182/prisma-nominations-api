@@ -16,6 +16,11 @@ public final class KafkaTopics {
     public static final String HEADER_EVENT_TYPE = "event_type";
     public static final String HEADER_SCHEMA_VERSION = "schema_version";
     public static final String HEADER_CORRELATION_ID = "correlation_id";
+    /**
+     * Contexto de traza W3C ({@code 00-<trace-id>-<span-id>-<flags>}), opcional. Complementa al correlation_id
+     * (id de negocio estable): une en una sola traza HTTP → outbox → Kafka → consumers → ABM.
+     */
+    public static final String HEADER_TRACEPARENT = "traceparent";
 
     private KafkaTopics() {
     }
