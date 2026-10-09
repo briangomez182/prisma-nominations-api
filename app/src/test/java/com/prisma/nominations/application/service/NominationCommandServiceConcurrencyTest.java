@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Requests simultáneas con la misma clave de idempotencia contra PostgreSQL real: la constraint UNIQUE
- * decide la ganadora y el resto responde como replay.
+ * decide la ganadora y el resto responde como replay, sin generar eventos en el outbox.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -66,6 +66,9 @@ class NominationCommandServiceConcurrencyTest {
                     Integer.class, "ENT-CONC", requestId)).isEqualTo(1);
             assertThat(jdbc.queryForObject(
                     "SELECT count(*) FROM nomination_history WHERE nomination_id = ? AND to_status = 'RECEIVED'",
+                    Integer.class, id)).isEqualTo(1);
+            assertThat(jdbc.queryForObject(
+                    "SELECT count(*) FROM outbox_events WHERE aggregate_id = ? AND event_type = 'nomination.requested'",
                     Integer.class, id)).isEqualTo(1);
         }
     }

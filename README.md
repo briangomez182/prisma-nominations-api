@@ -42,7 +42,7 @@ Canal ──POST /v1/nominations──▶ Nominations API ──(1 TX: nominaci�
 | D3 | Fuente de verdad | **PostgreSQL**: estado actual + historial solo de inserción + outbox | NoSQL | Transacciones ACID entre estado, historial y evento; `UNIQUE`, `CHECK` y lock optimista en un solo motor. |
 | D4 | Idempotencia de ingreso | Clave **(entity_id, request_id)** con `UNIQUE` en la base. Un repetido devuelve la nominación existente, sin reenviar. | Cache con TTL (Redis) | La base garantiza unicidad aun con concurrencia. La clave vive lo mismo que la nominación (sin TTL que pueda expirar antes de un reintento tardío). |
 | D5 | Consistencia estado ↔ evento | **Transactional Outbox**: el evento se inserta en la misma transacción que el cambio de estado | Dual write (guardar y publicar) | Si la TX hace rollback no hay evento; si Kafka está caído el evento espera en la tabla (E8). |
-| D6 | Relay del outbox | Demo: **polling** con `SELECT … FOR UPDATE SKIP LOCKED`. Producción: **Debezium (CDC)** | — | El contrato (tabla outbox) es el mismo; cambiar el relay no toca el dominio. Polling evita levantar Kafka Connect en la demo. |
+| D6 | Relay del outbox | Demo: **polling** con `SELECT … FOR UPDATE SKIP LOCKED`, un evento pendiente por nominación por ciclo (orden) y marca de publicado después del ack (at-least-once). Producción: **Debezium (CDC)** | — | El contrato (tabla outbox) es el mismo; cambiar el relay no toca el dominio. Polling evita levantar Kafka Connect en la demo. |
 | D7 | Mensajería | **Kafka**, key = `nomination_id` (orden por nominación). Tópicos `nomination.requested.v1`, `abm.responses.v1`, `nomination.result.v1` + DLT | Cola administrada (SQS, RabbitMQ) | Retención y replay por offset: un consumidor caído retoma donde quedó (E9). Escala por particiones (E10). |
 | D8 | Integración ABM | Adapter que consume `nomination.requested.v1` y llama a ABM por HTTP; la respuesta vuelve por `abm.responses.v1` | Callback HTTP directo a la API | Desacopla y absorbe picos. En la demo, ABM es un mock (perfil `abm-mock`) que responde con demora configurable: aprueba, rechaza, no responde o duplica. |
 | D9 | Idempotencia de retorno ABM | La respuesta trae `nomination_id` + `request_id` + `correlation_id`. Si la nominación ya está en estado final → ACK sin efectos. `@Version` para respuestas simultáneas. | Tabla de dedup aparte | La máquina de estados ya sabe si la respuesta fue procesada (E7). |
@@ -81,10 +81,58 @@ RECEIVED ──▶ PENDING_ABM ──▶ APPROVED | REJECTED          (finales: 
 | `nominations` | Estado actual, una fila por nominación | `UNIQUE (entity_id, request_id)` · `CHECK` de estados · `CHECK` rechazo ⇔ motivo · `version` (lock optimista) |
 | `nomination_history` | Una fila por transición: origen, detalle, correlation_id | Solo inserción: un trigger bloquea `UPDATE` y `DELETE` |
 | `outbox_events` | Eventos pendientes de publicar | Índice único parcial: **un solo** `nomination.result` por nominación |
+| `consumer_processed_events` | Dedup del consumidor de ejemplo: un `event_id` procesado por consumer group | `PRIMARY KEY (consumer, event_id)` |
 
 Datos sensibles: `card_token` nunca es un PAN (el dominio rechaza 13 a 19 dígitos). `account_id` se persiste porque ABM lo necesita, pero `toString()` y las respuestas lo muestran enmascarado (`****7654`).
 
 Retención: la clave de idempotencia vive lo mismo que la nominación. Las filas publicadas del outbox se purgan periódicamente.
+
+## Mensajería y outbox
+
+Contrato de eventos (payloads, headers, versionado, DLT y reproceso): [`docs/events.md`](docs/events.md).
+
+| Tópico | Key | Productor | Consumidor | DLT |
+|--------|-----|-----------|------------|-----|
+| `nomination.requested.v1` | `nomination_id` | API (outbox → relay) | ABM Adapter (fase 5) | `nomination.requested.v1-dlt` |
+| `abm.responses.v1` | `nomination_id` | ABM Adapter (fase 5) | ABM Response Consumer (fase 5) | `abm.responses.v1-dlt` |
+| `nomination.result.v1` | `nomination_id` | API (outbox → relay) | Consumidor de ejemplo `notifications-demo` (+ canales, BI) | `nomination.result.v1-dlt` |
+
+Headers de todo mensaje: `event_id`, `event_type`, `schema_version`, `correlation_id`. Los tópicos y sus DLT (mismas
+particiones) los crea la app al arrancar.
+
+**Relay (D6).** Un ciclo programado (`fixed-delay`) toma un lote de `outbox_events` pendientes con
+`FOR UPDATE SKIP LOCKED`, así varias instancias corren en paralelo sin tomar la misma fila (E10).
+
+- **Orden por nominación:** en cada ciclo solo entra el evento pendiente **más antiguo de cada nominación**; el
+  siguiente espera a que ese se publique. Junto con key = `nomination_id` (misma partición), los consumidores ven
+  los eventos de una nominación en orden.
+- **Marca después del ack:** la fila se marca `published_at` recién con el ack de Kafka (`acks=all`, productor
+  idempotente, espera acotada por `send-timeout`).
+- **Corte de lote ante falla:** si un envío falla se registra `attempts` y `last_error` y se corta el lote; el
+  ciclo siguiente reintenta. El evento nunca se pierde: Kafka caído solo demora la publicación (E8).
+- **At-least-once:** si el proceso cae entre el ack y el commit, el evento se vuelve a publicar. Los consumidores
+  deduplican por `event_id` (el de ejemplo, en `consumer_processed_events` en la misma TX que el efecto).
+- **Purga:** los eventos publicados se borran pasada la retención, por tandas; los pendientes nunca se borran.
+
+Consumidor de ejemplo (`notifications-demo`): commit de offset por registro después de procesar; error transitorio
+→ reintentos con backoff y luego DLT; mensaje imposible de procesar (poison pill) → DLT directo.
+
+| Property | Default | Para qué |
+|----------|---------|----------|
+| `nominations.kafka.partitions` / `.replication-factor` | `6` / `1` | Particiones (paralelismo de consumers) y réplicas de los tópicos |
+| `nominations.outbox.relay.enabled` | `true` | Ciclo programado del relay (`false` en tests o cuando publica Debezium) |
+| `nominations.outbox.relay.fixed-delay` | `500ms` | Pausa entre ciclos |
+| `nominations.outbox.relay.batch-size` | `100` | Eventos que toma (y bloquea) cada ciclo |
+| `nominations.outbox.relay.send-timeout` | `5s` | Espera máxima del ack de Kafka por evento |
+| `nominations.outbox.retention` | `7d` | Antigüedad de un evento publicado antes de purgarlo |
+| `nominations.outbox.purge.enabled` / `.fixed-delay` / `.initial-delay` | `true` / `1h` / `1m` | Purga del outbox |
+| `nominations.demo-consumer.enabled` / `.group-id` | `true` / `notifications-demo` | Consumidor de ejemplo de `nomination.result.v1` |
+| `nominations.demo-consumer.max-attempts` / `.backoff` | `3` / `1s` | Reintentos ante error transitorio antes del DLT |
+
+Tests: `OutboxRelayIntegrationTest` (relay, orden, SKIP LOCKED, fallas de Kafka, purga),
+`NominationResultNotifierIntegrationTest` (dedup, DLT, evolución del esquema) y
+`NominationEventFlowIntegrationTest` / `NominationEventFlowRelayDownIntegrationTest` (flujo de punta a punta: E1,
+E3, E8, E9 y trazabilidad del `correlation_id`).
 
 ## Estructura
 
@@ -160,7 +208,7 @@ Errores: RFC 9457 (`application/problem+json`) con `code`, `correlation_id`, `ti
 - [x] Fase 1 — Bootstrap y decisiones
 - [x] Fase 2 — Dominio y base
 - [x] Fase 3 — API
-- [ ] Fase 4 — Outbox + Kafka
+- [x] Fase 4 — Outbox + Kafka
 - [ ] Fase 5 — ABM mock + respuesta
 - [ ] Fase 6 — Resiliencia
 - [ ] Fase 7 — Seguridad y observabilidad

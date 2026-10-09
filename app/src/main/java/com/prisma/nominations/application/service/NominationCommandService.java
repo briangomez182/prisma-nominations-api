@@ -1,11 +1,13 @@
 package com.prisma.nominations.application.service;
 
+import com.prisma.nominations.application.event.NominationRequested;
 import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.application.exception.IdempotencyConflictException;
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
 import com.prisma.nominations.application.port.in.CreateNominationResult;
 import com.prisma.nominations.application.port.in.CreateNominationUseCase;
 import com.prisma.nominations.application.port.out.NominationRepository;
+import com.prisma.nominations.application.port.out.OutboxPort;
 import com.prisma.nominations.domain.AccountId;
 import com.prisma.nominations.domain.CardToken;
 import com.prisma.nominations.domain.Nomination;
@@ -30,11 +32,14 @@ class NominationCommandService implements CreateNominationUseCase {
     private static final Logger log = LoggerFactory.getLogger(NominationCommandService.class);
 
     private final NominationRepository repository;
+    private final OutboxPort outbox;
     private final TransactionOperations transactions;
     private final Clock clock;
 
-    NominationCommandService(NominationRepository repository, TransactionOperations transactions, Clock clock) {
+    NominationCommandService(NominationRepository repository, OutboxPort outbox, TransactionOperations transactions,
+                             Clock clock) {
         this.repository = repository;
+        this.outbox = outbox;
         this.transactions = transactions;
         this.clock = clock;
     }
@@ -52,8 +57,12 @@ class NominationCommandService implements CreateNominationUseCase {
                 command.correlationId(), clock.instant());
         try {
             // Transacción explícita (no @Transactional) para no depender de self-invocation.
-            // Fase 4: el INSERT del outbox (pedido a ABM) va dentro de esta misma transacción.
-            var saved = transactions.execute(status -> repository.save(nomination));
+            // Nominación y pedido a ABM (outbox) se confirman juntos o ninguno: sin commit no hay evento.
+            var saved = transactions.execute(status -> {
+                var created = repository.save(nomination);
+                outbox.append(NominationRequested.of(created, clock.instant()));
+                return created;
+            });
             log.info("Nominación creada nomination_id={} request_id={}", saved.id(), saved.requestId());
             return new CreateNominationResult(saved, false);
         } catch (DuplicateNominationException race) {

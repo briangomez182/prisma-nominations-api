@@ -1,5 +1,7 @@
 package com.prisma.nominations.application.service;
 
+import com.prisma.nominations.application.event.IntegrationEvent;
+import com.prisma.nominations.application.event.NominationRequested;
 import com.prisma.nominations.application.exception.IdempotencyConflictException;
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
 import com.prisma.nominations.domain.AccountId;
@@ -12,6 +14,8 @@ import org.springframework.transaction.support.TransactionOperations;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
@@ -23,7 +27,9 @@ class NominationCommandServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-08T12:00:00Z");
 
     private final InMemoryNominationRepository repository = new InMemoryNominationRepository();
-    private final NominationCommandService service = new NominationCommandService(repository,
+    /** Outbox en memoria: registra los eventos agregados. */
+    private final List<IntegrationEvent> outbox = new ArrayList<>();
+    private final NominationCommandService service = new NominationCommandService(repository, outbox::add,
             TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     private static CreateNominationCommand command(UUID requestId) {
@@ -41,6 +47,12 @@ class NominationCommandServiceTest {
         assertThat(repository.findHistory(result.nomination().id()))
                 .singleElement()
                 .satisfies(change -> assertThat(change.to()).isEqualTo(RECEIVED));
+        assertThat(outbox).singleElement().isInstanceOfSatisfying(NominationRequested.class, event -> {
+            assertThat(event.nominationId()).isEqualTo(result.nomination().id());
+            assertThat(event.accountId()).isEqualTo("987654");
+            assertThat(event.correlationId()).isEqualTo("corr-1");
+            assertThat(event.occurredAt()).isEqualTo(NOW);
+        });
     }
 
     @Test
@@ -54,6 +66,7 @@ class NominationCommandServiceTest {
         assertThat(second.nomination().id()).isEqualTo(first.nomination().id());
         assertThat(repository.count()).isEqualTo(1);
         assertThat(repository.saves).isEqualTo(1);
+        assertThat(outbox).hasSize(1);
     }
 
     @Test
@@ -66,6 +79,7 @@ class NominationCommandServiceTest {
 
         assertThatThrownBy(() -> service.create(changed)).isInstanceOf(IdempotencyConflictException.class);
         assertThat(repository.count()).isEqualTo(1);
+        assertThat(outbox).hasSize(1);
     }
 
     @Test
@@ -91,6 +105,7 @@ class NominationCommandServiceTest {
         assertThat(result.replayed()).isTrue();
         assertThat(result.nomination().id()).isEqualTo(winner.id());
         assertThat(repository.count()).isEqualTo(1);
+        assertThat(outbox).isEmpty();
     }
 
     @Test
@@ -102,6 +117,7 @@ class NominationCommandServiceTest {
 
         assertThatThrownBy(() -> service.create(command(requestId)))
                 .isInstanceOf(IdempotencyConflictException.class);
+        assertThat(outbox).isEmpty();
     }
 
     @Test
@@ -114,5 +130,6 @@ class NominationCommandServiceTest {
                 .extracting(e -> ((InvalidNominationDataException) e).field())
                 .isEqualTo("card_id");
         assertThat(repository.saves).isZero();
+        assertThat(outbox).isEmpty();
     }
 }

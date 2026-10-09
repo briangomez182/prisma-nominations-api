@@ -37,6 +37,27 @@ spring:
       auto-offset-reset: earliest
       enable-auto-commit: false
 
+nominations:
+  kafka:
+    partitions: 6               # unidad de paralelismo de los consumers
+    replication-factor: 1       # local; en producción >= 3 con min.insync.replicas=2
+  outbox:
+    relay:
+      enabled: true
+      fixed-delay: 500ms
+      batch-size: 100
+      send-timeout: 5s
+    retention: 7d               # purga de eventos ya publicados
+    purge:
+      enabled: true
+      fixed-delay: 1h
+      initial-delay: 1m
+  demo-consumer:
+    enabled: true               # consumidor de ejemplo de nomination.result.v1
+    group-id: notifications-demo
+    max-attempts: 3             # luego, a nomination.result.v1-dlt
+    backoff: 1s
+
 server:
   shutdown: graceful
 
