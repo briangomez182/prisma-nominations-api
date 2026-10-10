@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "817b491a-8644-5591-8efc-9aee6fe4a2c6",
     "name": "Prisma Nominations API",
-    "description": "Escenarios E1–E7 de la prueba técnica. Los JWT de demo se generan solos (pre-request de la colección). Correr las carpetas en orden, o toda la colección con el Collection Runner. E8–E10 apagan servicios o generan volumen: ver scripts/demo.sh y scripts/load-test.sh.",
+    "description": "Escenarios E1–E7 de la prueba técnica. Los JWT de demo se generan solos (pre-request de la colección). No requiere environment: las variables (base_url, entidades, clave de demo) vienen en la colección. Correr las carpetas en orden, o toda la colección con el Collection Runner. E8–E10 apagan servicios o generan volumen: ver scripts/demo.sh y scripts/load-test.sh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -35,6 +35,26 @@
     }
   ],
   "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "entity_id",
+      "value": "ENT01"
+    },
+    {
+      "key": "other_entity_id",
+      "value": "ENT02"
+    },
+    {
+      "key": "jwt_issuer",
+      "value": "prisma-nominations-demo"
+    },
+    {
+      "key": "jwt_secret",
+      "value": "PaMXbHK/6wehI0TgMBIYHUm7EjsB+82m10nGxpXDpYE="
+    },
     {
       "key": "request_id",
       "value": ""

@@ -56,17 +56,18 @@ scripts/demo.sh E6         # un solo escenario
 
 **Con Postman (alternativa a `curl`)**
 
-1. En Postman: **Import** → arrastrar los dos archivos de [`docs/postman/`](docs/postman):
-   `prisma-nominations.postman_collection.json` y `local.postman_environment.json`.
-2. Arriba a la derecha, elegir el environment **Prisma Nominations - local**. Si la API corre en otro puerto,
-   cambiar ahí `base_url`.
-3. Correr las carpetas en orden (E1 → E7) o toda la colección con **Run collection**. Cada request tiene tests que
+1. En Postman: **Import** → [`docs/postman/prisma-nominations.postman_collection.json`](docs/postman). No hace falta
+   environment: `base_url`, las entidades y la clave de demo vienen como variables de la colección (pestaña
+   **Variables** de la colección; ahí se cambia `base_url` si la API corre en otro puerto).
+2. Correr las carpetas en orden (E1 → E7) o toda la colección con **Run collection**. Cada request tiene tests que
    validan el resultado esperado.
+
+`local.postman_environment.json` es opcional: si se importa y se selecciona, sus valores pisan los de la colección.
 
 No hace falta generar tokens: el pre-request de la colección firma los JWT de demo en cada request (canal de ENT01,
 otra entidad, solo lectura y operador), igual que `scripts/mint-token.sh`. E8–E10 apagan servicios o generan
 volumen, así que se muestran con `scripts/demo.sh`. Desde la terminal, la misma colección corre con Newman:
-`npx newman run docs/postman/prisma-nominations.postman_collection.json -e docs/postman/local.postman_environment.json`.
+`npx newman run docs/postman/prisma-nominations.postman_collection.json`.
 
 **4. Mirar**
 
