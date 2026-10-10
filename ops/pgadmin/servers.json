@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "nominations (demo)",
+      "Group": "Prisma",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "nominations",
+      "Username": "nominations",
+      "PassFile": "/tmp/pgpass",
+      "SSLMode": "prefer"
+    }
+  }
+}

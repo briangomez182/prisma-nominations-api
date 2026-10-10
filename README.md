@@ -14,9 +14,10 @@ Para probarlo desde cero en unos 5 minutos. Solo hace falta Docker; no hace falt
 
 - Docker Desktop (o Docker Engine + Compose v2) corriendo, con al menos 4 GB de memoria asignada.
 - Para los scripts: `bash`, `curl`, `jq` y `openssl`. En macOS: `brew install jq`. En Windows: usar WSL o Git Bash.
-- Puertos libres: 8080 (API), 5432 (PostgreSQL), 9092 (Kafka), 8081 (Kafka UI), 9090 (Prometheus), 3000 (Grafana),
-  16686, 4317 y 4318 (Jaeger). Si el 8080 o el 3000 están ocupados: `APP_PORT=9080` / `GRAFANA_PORT=3001` delante
-  del `docker compose up` (con otro puerto de API, los scripts usan `BASE_URL=http://localhost:9080`).
+- Puertos libres: 8080 (API), 5432 (PostgreSQL), 5050 (pgAdmin), 9092 (Kafka), 8081 (Kafka UI), 9090 (Prometheus),
+  3000 (Grafana), 16686, 4317 y 4318 (Jaeger). Si el 8080, el 3000 o el 5050 están ocupados: `APP_PORT=9080` /
+  `GRAFANA_PORT=3001` / `PGADMIN_PORT=5051` delante del `docker compose up` (con otro puerto de API, los scripts
+  usan `BASE_URL=http://localhost:9080`).
 
 **1. Clonar y levantar todo**
 
@@ -75,6 +76,7 @@ volumen, así que se muestran con `scripts/demo.sh`. Desde la terminal, la misma
 |-----|-----|
 | Swagger UI (probar la API desde el navegador; token con `scripts/mint-token.sh ENT01`) | http://localhost:8080/swagger-ui.html |
 | Kafka UI (tópicos, mensajes y lag de consumidores) | http://localhost:8081 |
+| pgAdmin (estructura y datos de PostgreSQL, sin login: servidor "nominations (demo)" ya conectado) | http://localhost:5050 |
 | Jaeger (traza de punta a punta de cada nominación) | http://localhost:16686 |
 | Grafana (tablero operativo, admin/admin) | http://localhost:3000 |
 | Prometheus (métricas y alertas) | http://localhost:9090/alerts |
@@ -441,7 +443,7 @@ docker compose up -d --build            # la app queda healthy en ~20 s; APP_POR
 docker compose logs -f app              # logs JSON (ECS) con correlationId y traceId
 
 # Modo B: app en el host (desarrollo) y el resto en Docker
-APP_RUNS_ON=host docker compose up -d postgres kafka kafka-ui jaeger prometheus grafana
+APP_RUNS_ON=host docker compose up -d postgres kafka kafka-ui jaeger prometheus grafana pgadmin
 cd app && mvn spring-boot:run
 
 # Sin compose: Postgres y Kafka con Testcontainers
@@ -459,7 +461,7 @@ La imagen (`app/Dockerfile`) es multi-stage: build con Maven, runtime JRE 21 Alp
 
 - API: http://localhost:8080 (con token: ver [Seguridad](#seguridad)) · Swagger: http://localhost:8080/swagger-ui.html
 - Health: http://localhost:8080/actuator/health · Métricas: http://localhost:8080/actuator/prometheus
-- Kafka UI: http://localhost:8081
+- Kafka UI: http://localhost:8081 · pgAdmin: http://localhost:5050 (sin login; servidor "nominations (demo)" ya conectado)
 - Grafana: http://localhost:3000 (admin/admin; si el puerto está ocupado: `GRAFANA_PORT=3001 docker compose up -d`)
 - Prometheus: http://localhost:9090 (alertas en `/alerts`, targets en `/targets`) · Jaeger: http://localhost:16686
 
