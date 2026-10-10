@@ -1,6 +1,6 @@
 package com.prisma.nominations.infrastructure.adapter.in.messaging;
 
-import com.prisma.nominations.domain.RejectionReason;
+import com.prisma.nominations.domain.enums.RejectionReason;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

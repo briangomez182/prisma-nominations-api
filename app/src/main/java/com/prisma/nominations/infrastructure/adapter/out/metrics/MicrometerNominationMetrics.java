@@ -1,11 +1,11 @@
 package com.prisma.nominations.infrastructure.adapter.out.metrics;
 
 import com.prisma.nominations.application.port.out.NominationMetrics;
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.NominationStatus;
-import com.prisma.nominations.domain.RejectionReason;
-import com.prisma.nominations.domain.ResolutionOutcome;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.enums.RejectionReason;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;

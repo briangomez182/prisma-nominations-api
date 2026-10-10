@@ -1,6 +1,6 @@
 package com.prisma.nominations.infrastructure.adapter.out.persistence;
 
-import com.prisma.nominations.domain.NominationStatus;
+import com.prisma.nominations.domain.enums.NominationStatus;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;

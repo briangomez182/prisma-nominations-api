@@ -3,8 +3,8 @@ package com.prisma.nominations.application.service;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
 import com.prisma.nominations.application.port.in.GetNominationQuery;
 import com.prisma.nominations.application.port.out.NominationRepository;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.model.StatusChange;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

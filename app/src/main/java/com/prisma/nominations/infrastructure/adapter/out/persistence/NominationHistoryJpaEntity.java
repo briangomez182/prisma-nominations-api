@@ -1,7 +1,7 @@
 package com.prisma.nominations.infrastructure.adapter.out.persistence;
 
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.NominationStatus;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.enums.NominationStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

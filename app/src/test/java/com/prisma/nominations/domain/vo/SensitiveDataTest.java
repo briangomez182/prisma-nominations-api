@@ -1,5 +1,6 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.vo;
 
+import com.prisma.nominations.domain.exception.InvalidNominationDataException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

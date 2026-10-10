@@ -1,6 +1,6 @@
 package com.prisma.nominations.infrastructure.adapter.out.metrics;
 
-import com.prisma.nominations.domain.NominationStatus;
+import com.prisma.nominations.domain.enums.NominationStatus;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;

@@ -5,7 +5,7 @@ import com.prisma.nominations.application.port.in.AbmResponseCommand;
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
 import com.prisma.nominations.application.port.in.CreateNominationUseCase;
 import com.prisma.nominations.application.port.in.ProcessAbmResponseUseCase;
-import com.prisma.nominations.domain.AbmDecision;
+import com.prisma.nominations.domain.model.AbmDecision;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;

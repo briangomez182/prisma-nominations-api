@@ -1,8 +1,8 @@
 package com.prisma.nominations.infrastructure.adapter.in.web;
 
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.NominationStatus;
-import com.prisma.nominations.domain.RejectionReason;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.enums.RejectionReason;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;

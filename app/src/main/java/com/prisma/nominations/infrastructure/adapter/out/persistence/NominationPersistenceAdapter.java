@@ -2,11 +2,11 @@ package com.prisma.nominations.infrastructure.adapter.out.persistence;
 
 import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.application.port.out.NominationRepository;
-import com.prisma.nominations.domain.AccountId;
-import com.prisma.nominations.domain.CardToken;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.NominationStatus;
-import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.model.StatusChange;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Limit;

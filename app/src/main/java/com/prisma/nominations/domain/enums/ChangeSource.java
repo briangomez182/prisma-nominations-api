@@ -1,4 +1,4 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.enums;
 
 /**
  * Componente que originó un cambio de estado. Queda en la auditoría.

@@ -1,13 +1,13 @@
 package com.prisma.nominations.infrastructure.adapter.out.metrics;
 
 import com.prisma.nominations.application.port.out.NominationMetrics.SubmissionOutcome;
-import com.prisma.nominations.domain.AbmDecision;
-import com.prisma.nominations.domain.AccountId;
-import com.prisma.nominations.domain.CardToken;
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.RejectionReason;
-import com.prisma.nominations.domain.ResolutionOutcome;
+import com.prisma.nominations.domain.model.AbmDecision;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.RejectionReason;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;

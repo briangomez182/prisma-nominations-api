@@ -1,8 +1,8 @@
 package com.prisma.nominations.application.port.in;
 
 import com.prisma.nominations.application.exception.NominationNotFoundException;
-import com.prisma.nominations.domain.InvalidStatusTransitionException;
-import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.exception.InvalidStatusTransitionException;
+import com.prisma.nominations.domain.model.Nomination;
 
 import java.util.UUID;
 

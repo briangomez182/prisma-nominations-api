@@ -1,5 +1,6 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.vo;
 
+import com.prisma.nominations.domain.exception.InvalidNominationDataException;
 import java.util.regex.Pattern;
 
 /**

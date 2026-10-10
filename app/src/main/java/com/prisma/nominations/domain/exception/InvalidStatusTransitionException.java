@@ -1,5 +1,6 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.exception;
 
+import com.prisma.nominations.domain.enums.NominationStatus;
 import java.util.UUID;
 
 public class InvalidStatusTransitionException extends RuntimeException {

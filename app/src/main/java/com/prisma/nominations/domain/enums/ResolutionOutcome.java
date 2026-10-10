@@ -1,4 +1,4 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.enums;
 
 /**
  * Qué pasó al aplicar una respuesta de ABM sobre una nominación.

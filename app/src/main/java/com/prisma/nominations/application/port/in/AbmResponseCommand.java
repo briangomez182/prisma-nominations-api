@@ -1,6 +1,6 @@
 package com.prisma.nominations.application.port.in;
 
-import com.prisma.nominations.domain.AbmDecision;
+import com.prisma.nominations.domain.model.AbmDecision;
 
 import java.util.UUID;
 

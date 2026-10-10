@@ -1,6 +1,6 @@
 package com.prisma.nominations.application.event;
 
-import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.model.Nomination;
 
 import java.time.Instant;
 import java.util.UUID;

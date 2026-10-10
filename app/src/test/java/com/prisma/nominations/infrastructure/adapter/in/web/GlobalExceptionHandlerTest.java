@@ -3,7 +3,7 @@ package com.prisma.nominations.infrastructure.adapter.in.web;
 import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.application.exception.IdempotencyConflictException;
 import com.prisma.nominations.application.exception.NominationNotFoundException;
-import com.prisma.nominations.domain.CardToken;
+import com.prisma.nominations.domain.vo.CardToken;
 import com.prisma.nominations.infrastructure.adapter.in.web.GlobalExceptionHandlerTest.ErrorTestController;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;

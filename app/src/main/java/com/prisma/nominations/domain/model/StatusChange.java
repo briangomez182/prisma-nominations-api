@@ -1,5 +1,7 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.model;
 
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.enums.NominationStatus;
 import java.time.Instant;
 import java.util.UUID;
 

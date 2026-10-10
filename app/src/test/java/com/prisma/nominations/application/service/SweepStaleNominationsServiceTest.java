@@ -1,11 +1,11 @@
 package com.prisma.nominations.application.service;
 
-import com.prisma.nominations.domain.AbmDecision;
-import com.prisma.nominations.domain.AccountId;
-import com.prisma.nominations.domain.CardToken;
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.NominationStatus;
+import com.prisma.nominations.domain.model.AbmDecision;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.NominationStatus;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
@@ -16,10 +16,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
-import static com.prisma.nominations.domain.NominationStatus.ABM_TIMEOUT;
-import static com.prisma.nominations.domain.NominationStatus.APPROVED;
-import static com.prisma.nominations.domain.NominationStatus.PENDING_ABM;
-import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.ABM_TIMEOUT;
+import static com.prisma.nominations.domain.enums.NominationStatus.APPROVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.PENDING_ABM;
+import static com.prisma.nominations.domain.enums.NominationStatus.RECEIVED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

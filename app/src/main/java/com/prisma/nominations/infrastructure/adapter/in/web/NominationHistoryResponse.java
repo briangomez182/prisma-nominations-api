@@ -1,8 +1,8 @@
 package com.prisma.nominations.infrastructure.adapter.in.web;
 
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.NominationStatus;
-import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.model.StatusChange;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;

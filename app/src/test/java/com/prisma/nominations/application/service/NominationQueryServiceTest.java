@@ -1,18 +1,18 @@
 package com.prisma.nominations.application.service;
 
 import com.prisma.nominations.application.exception.NominationNotFoundException;
-import com.prisma.nominations.domain.AccountId;
-import com.prisma.nominations.domain.CardToken;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.model.StatusChange;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.UUID;
 
-import static com.prisma.nominations.domain.NominationStatus.PENDING_ABM;
-import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.PENDING_ABM;
+import static com.prisma.nominations.domain.enums.NominationStatus.RECEIVED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

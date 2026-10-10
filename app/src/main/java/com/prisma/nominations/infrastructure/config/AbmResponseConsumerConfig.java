@@ -1,7 +1,7 @@
 package com.prisma.nominations.infrastructure.config;
 
 import com.prisma.nominations.application.exception.NominationNotFoundException;
-import com.prisma.nominations.domain.InvalidStatusTransitionException;
+import com.prisma.nominations.domain.exception.InvalidStatusTransitionException;
 import com.prisma.nominations.infrastructure.adapter.in.messaging.InvalidEventException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;

@@ -1,5 +1,13 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.model;
 
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.enums.RejectionReason;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
+import com.prisma.nominations.domain.exception.InvalidNominationDataException;
+import com.prisma.nominations.domain.exception.InvalidStatusTransitionException;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

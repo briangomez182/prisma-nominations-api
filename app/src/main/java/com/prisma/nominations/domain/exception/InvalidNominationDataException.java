@@ -1,4 +1,4 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.exception;
 
 /**
  * Dato de entrada que viola una regla del dominio (formato, dato sensible sin tokenizar, etc.).

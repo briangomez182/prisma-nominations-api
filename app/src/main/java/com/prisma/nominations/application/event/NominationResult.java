@@ -1,8 +1,8 @@
 package com.prisma.nominations.application.event;
 
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.NominationStatus;
-import com.prisma.nominations.domain.RejectionReason;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.enums.RejectionReason;
 
 import java.time.Instant;
 import java.util.UUID;

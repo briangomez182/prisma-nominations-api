@@ -1,7 +1,7 @@
 package com.prisma.nominations.application.port.in;
 
 import com.prisma.nominations.application.exception.IdempotencyConflictException;
-import com.prisma.nominations.domain.InvalidNominationDataException;
+import com.prisma.nominations.domain.exception.InvalidNominationDataException;
 
 public interface CreateNominationUseCase {
 

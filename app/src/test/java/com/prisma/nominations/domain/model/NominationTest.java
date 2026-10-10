@@ -1,16 +1,24 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.model;
 
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.enums.RejectionReason;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
+import com.prisma.nominations.domain.exception.InvalidNominationDataException;
+import com.prisma.nominations.domain.exception.InvalidStatusTransitionException;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.UUID;
 
-import static com.prisma.nominations.domain.NominationStatus.ABM_TIMEOUT;
-import static com.prisma.nominations.domain.NominationStatus.APPROVED;
-import static com.prisma.nominations.domain.NominationStatus.PENDING_ABM;
-import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
-import static com.prisma.nominations.domain.NominationStatus.REJECTED;
+import static com.prisma.nominations.domain.enums.NominationStatus.ABM_TIMEOUT;
+import static com.prisma.nominations.domain.enums.NominationStatus.APPROVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.PENDING_ABM;
+import static com.prisma.nominations.domain.enums.NominationStatus.RECEIVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.REJECTED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

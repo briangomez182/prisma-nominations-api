@@ -1,4 +1,4 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.vo;
 
 final class Masking {
 

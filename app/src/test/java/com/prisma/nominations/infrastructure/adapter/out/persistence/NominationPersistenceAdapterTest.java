@@ -2,12 +2,12 @@ package com.prisma.nominations.infrastructure.adapter.out.persistence;
 
 import com.prisma.nominations.PostgresTestcontainersConfiguration;
 import com.prisma.nominations.application.exception.DuplicateNominationException;
-import com.prisma.nominations.domain.AbmDecision;
-import com.prisma.nominations.domain.AccountId;
-import com.prisma.nominations.domain.CardToken;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.RejectionReason;
-import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.domain.model.AbmDecision;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.RejectionReason;
+import com.prisma.nominations.domain.model.StatusChange;
 import jakarta.persistence.PersistenceException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -21,9 +21,9 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import java.time.Instant;
 import java.util.UUID;
 
-import static com.prisma.nominations.domain.NominationStatus.APPROVED;
-import static com.prisma.nominations.domain.NominationStatus.PENDING_ABM;
-import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.APPROVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.PENDING_ABM;
+import static com.prisma.nominations.domain.enums.NominationStatus.RECEIVED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

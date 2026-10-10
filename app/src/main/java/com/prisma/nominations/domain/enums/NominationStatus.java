@@ -1,4 +1,4 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.enums;
 
 import java.util.EnumSet;
 import java.util.Set;

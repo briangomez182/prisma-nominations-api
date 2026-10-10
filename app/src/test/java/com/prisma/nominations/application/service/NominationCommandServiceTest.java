@@ -4,10 +4,10 @@ import com.prisma.nominations.application.event.IntegrationEvent;
 import com.prisma.nominations.application.event.NominationRequested;
 import com.prisma.nominations.application.exception.IdempotencyConflictException;
 import com.prisma.nominations.application.port.in.CreateNominationCommand;
-import com.prisma.nominations.domain.AccountId;
-import com.prisma.nominations.domain.CardToken;
-import com.prisma.nominations.domain.InvalidNominationDataException;
-import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.vo.AccountId;
+import com.prisma.nominations.domain.vo.CardToken;
+import com.prisma.nominations.domain.exception.InvalidNominationDataException;
+import com.prisma.nominations.domain.model.Nomination;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import static com.prisma.nominations.domain.NominationStatus.RECEIVED;
+import static com.prisma.nominations.domain.enums.NominationStatus.RECEIVED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

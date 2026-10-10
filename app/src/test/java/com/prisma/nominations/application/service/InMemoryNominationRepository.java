@@ -2,9 +2,9 @@ package com.prisma.nominations.application.service;
 
 import com.prisma.nominations.application.exception.DuplicateNominationException;
 import com.prisma.nominations.application.port.out.NominationRepository;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.NominationStatus;
-import com.prisma.nominations.domain.StatusChange;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.NominationStatus;
+import com.prisma.nominations.domain.model.StatusChange;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.time.Instant;

@@ -1,6 +1,6 @@
 package com.prisma.nominations.application.port.in;
 
-import com.prisma.nominations.domain.Nomination;
+import com.prisma.nominations.domain.model.Nomination;
 
 /**
  * @param replayed {@code true} si el (entity_id, request_id) ya existía con el mismo contenido:

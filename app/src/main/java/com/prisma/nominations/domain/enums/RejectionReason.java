@@ -1,4 +1,4 @@
-package com.prisma.nominations.domain;
+package com.prisma.nominations.domain.enums;
 
 /**
  * Motivo de rechazo funcional normalizado. Los códigos propios de ABM se traducen a estos valores

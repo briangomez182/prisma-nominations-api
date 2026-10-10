@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prisma.nominations.application.port.in.AbmResponseCommand;
 import com.prisma.nominations.application.port.in.ProcessAbmResponseUseCase;
-import com.prisma.nominations.domain.AbmDecision;
+import com.prisma.nominations.domain.model.AbmDecision;
 import com.prisma.nominations.infrastructure.adapter.in.web.ApiHeaders;
 import com.prisma.nominations.infrastructure.config.AbmResponseConsumerConfig;
 import com.prisma.nominations.infrastructure.config.KafkaTopics;

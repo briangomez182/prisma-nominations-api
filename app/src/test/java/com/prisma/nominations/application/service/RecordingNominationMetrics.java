@@ -1,9 +1,9 @@
 package com.prisma.nominations.application.service;
 
 import com.prisma.nominations.application.port.out.NominationMetrics;
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.ResolutionOutcome;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
 
 import java.util.ArrayList;
 import java.util.List;

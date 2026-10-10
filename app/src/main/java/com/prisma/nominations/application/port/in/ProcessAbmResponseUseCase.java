@@ -1,7 +1,7 @@
 package com.prisma.nominations.application.port.in;
 
 import com.prisma.nominations.application.exception.NominationNotFoundException;
-import com.prisma.nominations.domain.ResolutionOutcome;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
 
 /**
  * Aplica la respuesta de ABM de forma idempotente. Si cambia el estado, en la misma transacción

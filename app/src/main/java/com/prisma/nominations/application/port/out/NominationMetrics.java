@@ -1,8 +1,8 @@
 package com.prisma.nominations.application.port.out;
 
-import com.prisma.nominations.domain.ChangeSource;
-import com.prisma.nominations.domain.Nomination;
-import com.prisma.nominations.domain.ResolutionOutcome;
+import com.prisma.nominations.domain.enums.ChangeSource;
+import com.prisma.nominations.domain.model.Nomination;
+import com.prisma.nominations.domain.enums.ResolutionOutcome;
 
 /**
  * Métricas de negocio del ciclo de vida de una nominación. Los casos de uso registran hechos de negocio; cómo se
