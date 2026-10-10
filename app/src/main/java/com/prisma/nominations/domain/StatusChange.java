@@ -5,6 +5,7 @@ import java.util.UUID;
 
 /**
  * Una transición de la máquina de estados. Es la unidad del historial de auditoría.
+ *
  * @param from {@code null} en la creación
  */
 public record StatusChange(
