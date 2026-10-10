@@ -490,7 +490,7 @@ scenario_e9() {
   kafka_cli kafka-console-producer.sh --topic nomination.result.v1 \
     --property parse.key=true --property 'key.separator=|' < "${TMP_DIR}/e9.txt" >/dev/null 2>&1 \
     || fail "no se pudo publicar en nomination.result.v1"
-  local lag; lag="$(group_lag notifications-demo)"
+  local lag; lag="$(wait_group_lag notifications-demo 3 15)"
   expect_eq "lag de notifications-demo con el consumidor caído" "${lag}" 3
   look "Kafka UI → Consumers → notifications-demo: lag 3"
   pause

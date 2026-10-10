@@ -96,6 +96,52 @@ docker compose down -v      # -v borra también los datos
 
 Más opciones (app en el host, sin compose) en [Cómo correr](#cómo-correr).
 
+## Arquitectura
+
+Vista de componentes en producción. En la demo todo corre en un único desplegable (D1) y ABM es un simulador dentro
+de la misma app; los límites entre componentes son los mismos.
+
+```
+                       ┌──────────────────────────────┐
+  Canales de las       │ API Gateway                  │      ┌───────────────────┐
+  entidades  ──HTTPS──▶│ mTLS · rate limit por entidad│◀────▶│ IdP corporativo   │
+  (OAuth2 client       │ WAF                          │ JWKS │ (OAuth2, JWT)     │
+   credentials)        └──────────────┬───────────────┘      └───────────────────┘
+                                      │
+  ┌───────────────────────────────────▼────────────────────────────────────────────────────────┐
+  │ prisma-nominations-api  (N réplicas stateless, hexagonal: domain ← application ← adapters)  │
+  │                                                                                            │
+  │  in/web          REST /v1/nominations · /internal/v1 (operador) · Actuator                 │
+  │  out/persistence JPA + Flyway  ─────────────────────────────────────┐                      │
+  │  out/messaging   Outbox relay (SKIP LOCKED) · purga                 │                      │
+  │  in/messaging    ABM Adapter · ABM Response Consumer · DLT handler  │                      │
+  │  out/abm         Cliente HTTP con Retry + Circuit Breaker + timeout │                      │
+  │  in/scheduling   Sweeper del SLA de ABM                             │                      │
+  └───────┬──────────────────────────────┬───────────────────────────────┼──────────────────────┘
+          │ produce / consume            │ HTTP                          │ JDBC (TX)
+          ▼                              ▼                               ▼
+  ┌─────────────────────────┐    ┌────────────────┐         ┌───────────────────────────────┐
+  │ Kafka (RF 3)            │    │ ABM            │         │ PostgreSQL (primario + réplica)│
+  │ nomination.requested.v1 │◀───│ (sistema       │         │ nominations · nomination_history│
+  │ abm.responses.v1        │    │  externo,      │         │ outbox_events                  │
+  │ nomination.result.v1    │    │  asincrónico)  │         │ consumer_processed_events      │
+  │ *-retry-N · *-dlt       │    └────────────────┘         └───────────────────────────────┘
+  └───────────┬─────────────┘
+              │ nomination.result.v1
+              ▼
+  Consumidores (notificaciones, canales, BI)
+
+  Transversal: OpenTelemetry → Jaeger/Tempo · Micrometer → Prometheus → Grafana + Alertmanager · logs JSON (ECS)
+```
+
+| Componente | Responsabilidad | Escala por |
+|------------|-----------------|------------|
+| API REST | Valida, aplica idempotencia, persiste nominación + historial + outbox en una TX, responde 202 | Réplicas detrás del balanceador |
+| Outbox relay | Publica los eventos pendientes en Kafka y los marca después del ack | Réplicas (SKIP LOCKED) |
+| ABM Adapter | Consume `nomination.requested.v1` y envía a ABM con resiliencia | Particiones del tópico |
+| ABM Response Consumer | Aplica la respuesta de ABM (dedup por estado) y genera `nomination.result` | Particiones del tópico |
+| Sweeper | Pasa a `ABM_TIMEOUT` lo que excede el SLA de respuesta | Seguro en multi-instancia (lock optimista) |
+
 ## Flujo end to end
 
 ```
@@ -142,6 +188,36 @@ Canal ──POST /v1/nominations──▶ Nominations API ──(1 TX: nominaci�
 | D13 | Trazabilidad | Header `X-Correlation-Id` (se genera si no viene) → MDC → historial → outbox → headers de Kafka | — | Permite reconstruir la operación desde el canal hasta el evento final. |
 | D14 | Versionado | API con `/v1` en la URL. Eventos con sufijo `.v1` en el tópico + campo `schema_version`. Solo cambios aditivos dentro de una versión. | Schema Registry (Avro) en la demo | Compatible hacia atrás sin infraestructura extra. Schema Registry queda como evolución para producción. |
 | D15 | Concurrencia | **Virtual threads** (Java 21) para la API y los consumers | WebFlux reactivo | Código imperativo simple con alta concurrencia de I/O. |
+
+## Supuestos
+
+| # | Supuesto | Si no se cumple |
+|---|----------|-----------------|
+| S1 | ABM es **idempotente por `nomination_id`**: un reenvío devuelve el mismo `abm_operation_id` sin crear un segundo alta | Un reintento o un reproceso podría duplicar el alta en ABM. Mitigación: consultar el estado en ABM antes de reenviar, o guardar el `abm_operation_id` y no reenviar si existe |
+| S2 | ABM acepta el pedido por HTTP (202) y responde **de forma asincrónica** por un tópico Kafka (`abm.responses.v1`) con `nomination_id`, `request_id` y `correlation_id` | Si ABM solo ofrece callback HTTP o polling, cambia el adaptador de entrada; el dominio y la máquina de estados no |
+| S3 | ABM responde en **minutos**; más allá de 15 minutos sin respuesta se considera falla técnica (SLA configurable) | El sweeper marcaría `ABM_TIMEOUT` antes de tiempo. Ajustar `response-sla` con el SLA real |
+| S4 | El canal envía el `card_id` **ya tokenizado** por la bóveda de tarjetas; la plataforma nunca ve el PAN | Habría que tokenizar adentro y la plataforma entraría en alcance PCI DSS |
+| S5 | Cada entidad financiera es un cliente OAuth2 del IdP corporativo y su token trae el claim `entity_id` | Sin ese claim no hay aislamiento por entidad: habría que mapear `client_id → entity_id` |
+| S6 | El `request_id` lo genera el canal (UUID) y lo reutiliza en cada reintento de la misma operación | Un canal que genera un `request_id` nuevo por reintento crea nominaciones duplicadas |
+| S7 | Volumen de referencia de **10k nominaciones por día** con picos de 10× (y diseño preparado para ×100) | Ver [Escalamiento](#escalamiento-e10) |
+| S8 | Los consumidores de `nomination.result.v1` toleran entrega **at-least-once** y deduplican por `event_id` | Un consumidor no idempotente podría notificar dos veces |
+| S9 | La validación de negocio de la nominación (titularidad, elegibilidad de la tarjeta) es responsabilidad de ABM; la API valida formato y obligatoriedad | Si hubiera reglas propias, se agregan en el dominio antes de persistir |
+
+## Riesgos conocidos
+
+| # | Riesgo | Impacto | Mitigación actual | Siguiente paso |
+|---|--------|---------|-------------------|----------------|
+| R1 | Toda la idempotencia de ida depende de S1 (ABM idempotente) | Alta duplicada en ABM tras una caída entre el 202 de ABM y el commit, o tras un reproceso | El adapter solo envía desde `RECEIVED`; el reproceso es manual y auditado | Acordar el contrato con ABM; persistir `abm_operation_id` |
+| R2 | `ABM_TIMEOUT` no publica `nomination.result` | El canal no se entera de la falla técnica hasta que ABM responda o un operador reprocese | Alertas `NominationsStuckPendingAbm` y `DltMessagesIncreasing`; el estado es consultable por `GET` | Evento informativo `nomination.delayed` sin romper la unicidad del resultado |
+| R3 | Relay por polling en lugar de CDC | Carga constante sobre la base y latencia de publicación de hasta `fixed-delay` | Índice parcial de pendientes, lote acotado, SKIP LOCKED | Debezium (CDC) en producción (D6) |
+| R4 | Monolito modular: API, adapter y consumers comparten proceso y pool de conexiones | Un pico de consumo puede afectar la latencia de la API | Virtual threads, timeouts, CB, reintentos no bloqueantes | Extraer el ABM Adapter a su propio desplegable si las métricas lo justifican |
+| R5 | Seguridad de la demo: JWT HS256 con clave compartida en `application.yml`, Actuator y Swagger públicos | Inaceptable en producción | Documentado y sobreescribible por variable de entorno | JWKS del IdP (RS256/ES256), management en red interna, secretos en vault |
+| R6 | `account_id` en claro en la base | Exposición ante un acceso indebido a la base o a un backup | Enmascarado en respuestas, logs y eventos públicos | Cifrado de columna con KMS y control de acceso a backups |
+| R7 | El historial registra el `source` de cada transición pero no la identidad (client_id) de quien la originó | Auditoría incompleta para un reproceso de operador | `correlation_id` y logs con el token validado | Agregar columna `actor` en `nomination_history` |
+| R8 | Kafka y PostgreSQL con una sola réplica en la demo | Pérdida de datos ante falla de un nodo | — (solo demo) | RF 3 + `min.insync.replicas=2`; Postgres con réplica y PITR |
+| R9 | Mensajes en DLT requieren intervención manual | Nominaciones sin avanzar si nadie atiende la alerta | Alerta `DltMessagesIncreasing` + runbook | Herramienta de reproceso desde el DLT con auditoría |
+| R10 | Cambios de contrato de ABM no versionados | Fallas de contrato van directo al DLT | Clasificación 4xx de contrato + alerta `AbmContractErrors` | Contract tests (consumer-driven) con ABM en el pipeline |
+| R11 | Crecimiento de `nomination_history` y de la clave de idempotencia sin TTL | Tablas grandes a ×100 | Índices y purga del outbox | Particionado por fecha y archivado según normativa |
 
 ## Máquina de estados
 
@@ -479,6 +555,27 @@ mvn test                                # suite completa (~3-4 min)
 ```
 
 Matriz escenario → diseño → tests → cómo verlo en la demo: [`docs/scenarios.md`](docs/scenarios.md).
+
+| Nivel | Qué cubre | Herramientas |
+|-------|-----------|--------------|
+| Unitarias | Dominio (máquina de estados, invariantes, datos sensibles) y casos de uso con puertos en memoria | JUnit 5, AssertJ |
+| Integración | Adaptadores contra infraestructura real: persistencia, outbox, listeners, cliente ABM, seguridad | Testcontainers (PostgreSQL, Kafka), servidor HTTP real para el cliente de ABM |
+| End to end | Escenarios E1–E10 completos con el simulador de ABM, incluyendo fallas (Kafka caído, consumidor caído, ABM caído o lento) | Testcontainers + `scripts/demo.sh` + colección Postman/Newman |
+| Carga | Pico de volumen con reintentos concurrentes y varias réplicas del relay | `E10PeakVolumeIntegrationTest`, `scripts/load-test.sh` |
+| Contrato | OpenAPI regenerada desde los tests; eventos documentados en `docs/events.md` | springdoc; en producción, Schema Registry y contract tests con ABM (R10) |
+
+## Despliegue y rollback
+
+El pipeline de CI está en [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+- **Pipeline:** build + suite completa con Testcontainers → imagen versionada por commit → staging → producción con
+  aprobación.
+- **Release:** rolling update (o canary) con readiness probe y `server.shutdown=graceful`; la app es stateless.
+- **Base de datos:** migraciones Flyway solo **expand/contract**: cada versión es compatible con el esquema de la
+  anterior, así que la app se puede volver atrás sin tocar la base.
+- **Eventos:** solo cambios aditivos dentro de `.v1`; un cambio incompatible va a un tópico `.v2` en paralelo.
+- **Rollback:** redeploy de la imagen anterior (sin rollback de base). Los eventos ya publicados y el outbox
+  pendiente siguen siendo válidos para la versión anterior.
 
 ## Demo
 

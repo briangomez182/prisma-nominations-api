@@ -213,10 +213,12 @@ Kafka y a cada línea de log (`[correlation_id]` después del nivel).
 | Poison pill o nominación inexistente en el DLT | No hay estado que cambiar. Analizar el productor; descartar o, si se corrigió un bug del consumidor, republicar |
 | Mensajes en `abm.responses.v1-dlt` / `nomination.result.v1-dlt` | Corregir la causa y republicar desde el DLT con sus headers (los consumidores son idempotentes). Ver [`events.md`](events.md#reprocesar-desde-el-dlt) |
 
-**Reproceso por endpoint interno** (uso de operador; la fase de seguridad exige rol):
+**Reproceso por endpoint interno** (uso de operador; requiere scope `nominations:operate`, sin él responde 403):
 
 ```bash
+OPS_TOKEN=$(scripts/mint-token.sh "" nominations:operate)   # en producción: token del IdP para el rol operador
 curl -i -X POST http://localhost:8080/internal/v1/nominations/<nomination_id>/reprocess \
+  -H "Authorization: Bearer $OPS_TOKEN" \
   -H 'X-Correlation-Id: ops-reprocess-0001'
 ```
 
