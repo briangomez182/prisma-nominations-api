@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Demo guiada de los escenarios obligatorios E1–E10 contra la API de nominaciones (guion: docs/demo.md).
+# Demo guiada de los escenarios obligatorios E1–E10 contra la API de nominaciones.
 #
 # Uso:
 #   scripts/demo.sh                 # E1 → E10 de corrido
@@ -565,7 +565,7 @@ done
 [[ ${#SELECTED[@]} -gt 0 ]] || read -r -a SELECTED <<<"${ALL_SCENARIOS}"
 
 if [[ "$(curl -s --max-time 5 "${BASE_URL}/actuator/health" | jq -r '.status // empty' 2>/dev/null)" != "UP" ]]; then
-  echo "La app no responde UP en ${BASE_URL}/actuator/health. Levantarla con el perfil demo (ver docs/demo.md)." >&2
+  echo "La app no responde UP en ${BASE_URL}/actuator/health. Levantarla con el perfil demo (docker compose up -d --build)." >&2
   exit 1
 fi
 TOKEN="$("${SCRIPT_DIR}/mint-token.sh" ENT01)"

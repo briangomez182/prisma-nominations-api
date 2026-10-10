@@ -482,8 +482,6 @@ Matriz escenario → diseño → tests → cómo verlo en la demo: [`docs/scenar
 
 ## Demo
 
-Guion de la presentación (10–12 min, qué decir y mostrar en cada escenario, plan B): [`docs/demo.md`](docs/demo.md).
-
 ```bash
 docker compose up -d --build          # la app corre con el perfil demo (tiempos comprimidos)
 scripts/demo.sh                       # E1 → E10 con checklist ✓/✗ al final

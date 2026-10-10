@@ -1,4 +1,4 @@
-# Perfil "demo": tiempos comprimidos para mostrar E1–E10 en vivo (scripts/demo.sh, docs/demo.md).
+# Perfil "demo": tiempos comprimidos para mostrar E1–E10 en vivo (scripts/demo.sh).
 # Se activa con SPRING_PROFILES_ACTIVE=demo (el docker-compose lo combina con json-logs).
 # Solo cambia TIEMPOS: la lógica, los tópicos y las garantías son las mismas que con los defaults de application.yml.
 #
